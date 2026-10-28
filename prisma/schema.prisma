@@ -1,0 +1,387 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// MongoDB (Atlas in production). Transactions require a replica set, which Atlas always is;
+// local development and tests use mongodb-memory-server's single-node replica set.
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// JSON-ish settings are stored as strings to keep one parsing path (see parseJsonArray/parseJsonObject).
+
+model Store {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  name                  String
+  websiteDomain         String
+  widgetKey             String   @unique
+  currency              String
+  defaultLocale         String
+  supportedLocales      String   @default("[\"en\"]")
+  trustedCheckoutHosts  String   @default("[]")
+  // [{"id":"dhaka","label":"Inside Dhaka","feeMinor":8000}, ...]
+  shippingZones         String   @default("[]")
+  freeShippingOverMinor Int?
+  codEnabled            Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  settings      ChatbotSettings?
+  productSource ProductSource?
+  products      Product[]
+  variants      ProductVariant[]
+  knowledge     KnowledgeDocument[]
+  sessions      ChatSession[]
+  conversations Conversation[]
+  carts         Cart[]
+  checkouts     CheckoutSession[]
+  orders        Order[]
+  uploads       Upload[]
+
+  @@index([websiteDomain])
+}
+
+model ChatbotSettings {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  storeId            String   @unique @db.ObjectId
+  provider           String   @default("openai-compatible")
+  model              String   @default("")
+  aiBaseUrl          String   @default("")
+  aiApiKeyEncrypted  String   @default("")
+  aiApiKeyLast4      String   @default("")
+  aiEffort           String   @default("medium")
+  assistantName      String   @default("Shopping assistant")
+  // friendly | professional | playful | luxury | custom
+  tone               String   @default("friendly")
+  customTone         String   @default("")
+  // straightforward | explainer | consultative
+  conversationStyle  String   @default("consultative")
+  systemInstructions String   @default("")
+  welcomeMessage     String
+  productGreeting    String   @default("")
+  fallbackMessage    String
+  // [{"label":"Looking for a product","prompt":"I'm looking for a product"}, ...]
+  suggestedTopics    String   @default("[]")
+  handoffEnabled     Boolean  @default(true)
+  handoffAfterMisses Int      @default(2)
+  handoffKeywords    String   @default("[\"human\",\"agent\",\"person\",\"manager\"]")
+  voiceEnabled       Boolean  @default(true)
+  attachmentsEnabled Boolean  @default(true)
+  enabledFeatures    String   @default("[\"product_cards\",\"cart_tools\",\"knowledge_search\",\"orders\"]")
+  widgetTheme        String   @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+}
+
+/// Where the catalog comes from. "api" mode syncs a public product API into the Product collection
+/// (the same collection the storefront uses), so products are never stored twice.
+model ProductSource {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  storeId         String    @unique @db.ObjectId
+  mode            String    @default("manual")
+  apiUrl          String    @default("")
+  // Field mapping, e.g. {"itemsPath":"data.products","id":"id","name":"title","price":"price",...}
+  mapping         String    @default("{}")
+  priceUnit       String    @default("major")
+  autoSync        Boolean   @default(false)
+  intervalMinutes Int       @default(60)
+  lastSyncAt      DateTime?
+  lastStatus      String    @default("never")
+  lastError       String    @default("")
+  lastCounts      String    @default("{}")
+  syncLockedUntil DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+}
+
+model AdminUser {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model Product {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  storeId           String   @db.ObjectId
+  // "manual" or "api"; API products are updated by sync and marked inactive when they disappear.
+  sourceType        String   @default("manual")
+  externalProductId String?
+  name              String
+  slug              String
+  description       String
+  category          String
+  brand             String   @default("")
+  imageUrl          String?
+  priceMinor        Int
+  currency          String
+  status            String   @default("active")
+  attributes        String   @default("{}")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  store     Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  variants  ProductVariant[]
+  cartItems CartItem[]
+
+  @@unique([storeId, slug])
+  @@index([storeId, status])
+  @@index([storeId, category])
+  @@index([storeId, externalProductId])
+}
+
+model ProductVariant {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  productId          String   @db.ObjectId
+  storeId            String   @db.ObjectId
+  externalVariantId  String?
+  sku                String
+  title              String
+  options            String   @default("{}")
+  priceOverrideMinor Int?
+  stockStatus        String   @default("in_stock")
+  stockQuantity      Int?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  store     Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cartItems CartItem[]
+
+  @@unique([productId, sku])
+  @@index([storeId])
+}
+
+model KnowledgeDocument {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  storeId         String   @db.ObjectId
+  title           String
+  content         String
+  sourceType      String   @default("manual")
+  sourceReference String?
+  status          String   @default("ready")
+  contentHash     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, title])
+  @@index([storeId, status])
+}
+
+model ChatSession {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  storeId        String   @db.ObjectId
+  visitorId      String
+  locale         String
+  createdAt      DateTime @default(now())
+  lastActivityAt DateTime @default(now())
+
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  carts         Cart[]
+
+  @@index([storeId])
+  @@index([visitorId])
+}
+
+model Conversation {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  storeId          String    @db.ObjectId
+  sessionId        String    @db.ObjectId
+  // bot: AI replies · waiting_human: handed off, waiting for an agent · human: agent replying · closed
+  status           String    @default("bot")
+  handoffReason    String    @default("")
+  handoffAt        DateTime?
+  assignedAdminId  String?   @db.ObjectId
+  assignedName     String    @default("")
+  missCount        Int       @default(0)
+  unreadForAdmin   Int       @default(0)
+  customerName     String    @default("")
+  customerPhone    String    @default("")
+  contextProductId String?   @db.ObjectId
+  lastMessageAt    DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  store    Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  session  ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([storeId, status, lastMessageAt])
+  @@index([sessionId])
+}
+
+type MessageAttachment {
+  uploadId   String
+  name       String
+  mime       String
+  size       Int
+  // image | audio | file
+  kind       String
+  transcript String?
+  durationMs Int?
+}
+
+model Message {
+  id                String              @id @default(auto()) @map("_id") @db.ObjectId
+  conversationId    String              @db.ObjectId
+  // user | assistant | agent | event
+  role              String
+  content           String
+  structuredContent String?
+  attachments       MessageAttachment[]
+  senderName        String              @default("")
+  createdAt         DateTime            @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+/// Customer attachments and voice notes. Stored in MongoDB (max 5 MB each) so no extra storage service is needed.
+model Upload {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  storeId        String   @db.ObjectId
+  sessionId      String?  @db.ObjectId
+  conversationId String?  @db.ObjectId
+  name           String
+  mime           String
+  size           Int
+  data           Bytes
+  createdAt      DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+model Cart {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  storeId   String   @db.ObjectId
+  sessionId String   @db.ObjectId
+  // active | checked_out | abandoned
+  status    String   @default("active")
+  currency  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store            Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  session          ChatSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  items            CartItem[]
+  checkoutSessions CheckoutSession[]
+
+  @@index([storeId])
+  @@index([sessionId, status])
+}
+
+model CartItem {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  cartId             String   @db.ObjectId
+  productId          String   @db.ObjectId
+  productVariantId   String?  @db.ObjectId
+  quantity           Int
+  priceSnapshotMinor Int
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  cart    Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+
+  @@index([cartId])
+  @@index([productId])
+}
+
+type CustomerDetails {
+  name    String
+  phone   String
+  email   String  @default("")
+  address String
+  city    String  @default("")
+  notes   String  @default("")
+}
+
+model CheckoutSession {
+  id               String           @id @default(auto()) @map("_id") @db.ObjectId
+  storeId          String           @db.ObjectId
+  cartId           String           @db.ObjectId
+  commerceProvider String
+  externalCartId   String?
+  token            String           @unique
+  checkoutUrl      String
+  // prepared | completed | expired | failed
+  status           String           @default("prepared")
+  idempotencyKey   String
+  lines            String
+  subtotalMinor    Int
+  currency         String
+  // Details collected in chat; the checkout page pre-fills them.
+  customer         CustomerDetails?
+  orderId          String?          @db.ObjectId
+  createdAt        DateTime         @default(now())
+  expiresAt        DateTime?
+  completedAt      DateTime?
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, idempotencyKey])
+  @@index([storeId, status])
+}
+
+type OrderLine {
+  productId      String
+  variantId      String?
+  name           String
+  variantTitle   String?
+  sku            String?
+  quantity       Int
+  unitPriceMinor Int
+  lineTotalMinor Int
+}
+
+type OrderStatusEvent {
+  status String
+  note   String   @default("")
+  at     DateTime
+  by     String   @default("system")
+}
+
+model Order {
+  id                String             @id @default(auto()) @map("_id") @db.ObjectId
+  storeId           String             @db.ObjectId
+  orderNumber       String             @unique
+  checkoutSessionId String?            @db.ObjectId
+  sessionId         String?            @db.ObjectId
+  conversationId    String?            @db.ObjectId
+  customer          CustomerDetails
+  items             OrderLine[]
+  subtotalMinor     Int
+  shippingMinor     Int
+  totalMinor        Int
+  currency          String
+  shippingZone      String             @default("")
+  // cod | online
+  paymentMethod     String
+  // pending | paid | refunded
+  paymentStatus     String             @default("pending")
+  // placed | confirmed | processing | shipped | delivered | cancelled | refunded
+  status            String             @default("placed")
+  statusHistory     OrderStatusEvent[]
+  trackingNumber    String             @default("")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, status, createdAt])
+  @@index([storeId, createdAt])
+}

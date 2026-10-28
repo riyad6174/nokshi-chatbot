@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="Ceramic Tea Set illustration">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e6e8df"/>
+      <stop offset="1" stop-color="#c8cfc1"/>
+    </linearGradient>
+    <linearGradient id="glaze" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a9bfa8"/>
+      <stop offset="1" stop-color="#6f8f74"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <circle cx="150" cy="170" r="130" fill="#eff2e9" opacity="0.6"/>
+  <ellipse cx="400" cy="655" rx="270" ry="48" fill="#77836f" opacity="0.25"/>
+  <ellipse cx="400" cy="610" rx="260" ry="52" fill="#8a9d86"/>
+  <ellipse cx="400" cy="600" rx="230" ry="42" fill="#a9b9a1"/>
+  <path d="M300 330c-52 0-92 54-92 120s40 120 92 120h200c52 0 92-54 92-120s-40-120-92-120Z" fill="url(#glaze)"/>
+  <path d="M300 330h200" stroke="#5d7a62" stroke-width="8"/>
+  <path d="M484 380c55 0 80 20 80 62s-25 62-80 62" fill="none" stroke="#6f8f74" stroke-width="20" stroke-linecap="round"/>
+  <path d="M300 370c-55 15-82 55-82 85" fill="none" stroke="#89a48c" stroke-width="18" stroke-linecap="round"/>
+  <ellipse cx="400" cy="330" rx="100" ry="18" fill="#c7d6c3"/>
+  <g>
+    <path d="M235 530h110v40c0 20-16 36-36 36h-38c-20 0-36-16-36-36Z" fill="#c7d6c3"/>
+    <path d="M565 530h-110v40c0 20 16 36 36 36h38c20 0 36-16 36-36Z" fill="#c7d6c3"/>
+    <ellipse cx="290" cy="530" rx="55" ry="10" fill="#e7eee2"/>
+    <ellipse cx="510" cy="530" rx="55" ry="10" fill="#e7eee2"/>
+  </g>
+</svg>

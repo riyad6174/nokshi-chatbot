@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="Handloom Scarf illustration">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f3e8e0"/>
+      <stop offset="1" stop-color="#dfc9c0"/>
+    </linearGradient>
+    <linearGradient id="silk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9c2f2a"/>
+      <stop offset="0.5" stop-color="#c0493f"/>
+      <stop offset="1" stop-color="#7c211d"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <circle cx="640" cy="170" r="140" fill="#fbf2ec" opacity="0.55"/>
+  <g transform="rotate(-12 400 400)">
+    <path d="M250 170c70 40 230 40 300 0 30 70 20 380-30 470-80 50-160 50-240 0-50-90-60-400-30-470Z" fill="url(#silk)"/>
+    <path d="M270 210c70 35 190 35 260 0" fill="none" stroke="#e9b26d" stroke-width="8"/>
+    <path d="M262 600c80 45 196 45 276 0" fill="none" stroke="#e9b26d" stroke-width="8"/>
+    <g fill="#e9b26d" opacity="0.85">
+      <path d="M330 300l16 34 37 5-27 26 7 37-33-18-33 18 7-37-27-26 37-5Z"/>
+      <path d="M470 300l16 34 37 5-27 26 7 37-33-18-33 18 7-37-27-26 37-5Z"/>
+      <path d="M400 430l16 34 37 5-27 26 7 37-33-18-33 18 7-37-27-26 37-5Z"/>
+      <path d="M330 520l10 21 23 3-17 16 4 23-20-11-20 11 4-23-17-16 23-3Z" opacity="0.8"/>
+      <path d="M470 520l10 21 23 3-17 16 4 23-20-11-20 11 4-23-17-16 23-3Z" opacity="0.8"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="Urban Trek Backpack illustration">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e9e3d6"/>
+      <stop offset="1" stop-color="#cfc3ae"/>
+    </linearGradient>
+    <linearGradient id="bag" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f5d50"/>
+      <stop offset="1" stop-color="#1c3f36"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <circle cx="640" cy="150" r="150" fill="#f3eee4" opacity="0.55"/>
+  <ellipse cx="400" cy="690" rx="220" ry="34" fill="#8f7f66" opacity="0.28"/>
+  <path d="M300 250c0-55 45-100 100-100s100 45 100 100" fill="none" stroke="#16332c" stroke-width="26" stroke-linecap="round"/>
+  <rect x="225" y="235" width="350" height="420" rx="90" fill="url(#bag)"/>
+  <rect x="285" y="405" width="230" height="160" rx="34" fill="#234a40"/>
+  <path d="M285 465h230" stroke="#16332c" stroke-width="12" stroke-linecap="round"/>
+  <rect x="368" y="435" width="64" height="22" rx="11" fill="#d9b26a"/>
+  <rect x="260" y="305" width="280" height="42" rx="21" fill="#3f7364" opacity="0.75"/>
+  <path d="M225 335c-40 30-60 75-60 120v80" fill="none" stroke="#16332c" stroke-width="20" stroke-linecap="round"/>
+  <path d="M575 335c40 30 60 75 60 120v80" fill="none" stroke="#16332c" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="400" cy="280" r="22" fill="#d9b26a"/>
+</svg>
