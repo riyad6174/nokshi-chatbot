@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AssistantOrb, type OrbState } from "@/components/chat/AssistantOrb";
 import { ChatComposer, type PendingAttachment } from "@/components/chat/ChatComposer";
+import { Confetti } from "@/components/chat/Confetti";
 import { CartSummary } from "@/components/chat/CartSummary";
 import { MessageList } from "@/components/chat/MessageList";
 import { formatMoney } from "@/lib/client/format";
@@ -52,7 +54,20 @@ type ChatPanelProps = {
   onUpdate: (itemId: string, quantity: number) => void;
   onRemove: (itemId: string) => void;
   onCheckout: (details?: CustomerDetailsData) => void;
+  /** Hands-free voice assistant: header button to start it, and its stage while active. */
+  voiceAssistant: { available: boolean; active: boolean; onStart: () => void };
+  /** What the assistant is doing, for the header orb. */
+  orbState: OrbState;
+  confirmingOrder: boolean;
+  onConfirmOrder: (confirmationId: string) => void;
 };
+
+function isOrderPlacedEvent(message: ChatMessage): boolean {
+  return (
+    message.role === "event" &&
+    message.parts.some((part) => part.type === "order_status" && part.orders.some((order) => order.status === "placed"))
+  );
+}
 
 export function ChatPanel({
   open,
@@ -86,9 +101,29 @@ export function ChatPanel({
   onUpdate,
   onRemove,
   onCheckout,
+  voiceAssistant,
+  orbState,
+  confirmingOrder,
+  onConfirmOrder,
 }: ChatPanelProps) {
   const [cartOpen, setCartOpen] = useState(false);
+  const [celebration, setCelebration] = useState<string | null>(null);
+  const celebratedRef = useRef<string | null | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const placed = [...messages].reverse().find(isOrderPlacedEvent);
+    if (celebratedRef.current === undefined) {
+      if (messages.length > 0) celebratedRef.current = placed?.id ?? null;
+      return;
+    }
+    if (placed && placed.id !== celebratedRef.current) {
+      celebratedRef.current = placed.id;
+      setCelebration(placed.id);
+      const timer = window.setTimeout(() => setCelebration(null), 4000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [messages]);
 
   useEffect(() => {
     if (!open) return;
@@ -127,26 +162,31 @@ export function ChatPanel({
         ? "Connecting you with our team…"
         : mode === "closed"
           ? "Conversation closed"
-          : "Online · replies instantly";
+          : voiceAssistant.active
+            ? "Voice mode · just talk"
+            : "AI shopping assistant · voice & chat";
 
   return (
     <section
       role="dialog"
       aria-label={`${storeName} chat`}
-      className={`fixed inset-2 z-50 flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-panel animate-panel-in sm:inset-auto sm:bottom-24 sm:h-[min(680px,calc(100dvh-7.5rem))] sm:w-[400px] ${
+      className={`fixed inset-x-2 bottom-[5.75rem] top-2 z-50 flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-panel animate-panel-in sm:inset-auto sm:bottom-24 sm:h-[min(680px,calc(100dvh-7.5rem))] sm:w-[400px] ${
         position === "left" ? "sm:left-6 origin-bottom-left" : "sm:right-6 origin-bottom-right"
       }`}
     >
       <header
         className="relative flex items-center gap-3 overflow-hidden px-4 py-3 text-white"
-        style={{ background: `linear-gradient(135deg, ${accent}, ${accent}d0)` }}
+        style={{ background: `linear-gradient(120deg, #1e1b4b 0%, #312e81 45%, ${accent} 100%)` }}
       >
-        <div className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/10" aria-hidden="true" />
-        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 text-sm font-semibold backdrop-blur">
-          {withHuman ? (agentName || storeName).charAt(0).toUpperCase() : (
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
-              <path d="M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4z" />
-            </svg>
+        <div className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full bg-fuchsia-500/20 blur-2xl" aria-hidden="true" />
+        <div className="pointer-events-none absolute -bottom-12 left-10 h-24 w-24 rounded-full bg-cyan-400/20 blur-2xl" aria-hidden="true" />
+        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center text-sm font-semibold">
+          {withHuman ? (
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur">
+              {(agentName || storeName).charAt(0).toUpperCase()}
+            </span>
+          ) : (
+            <AssistantOrb size={40} state={orbState} accent={accent} />
           )}
           <span
             className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white ${
@@ -161,6 +201,19 @@ export function ChatPanel({
             {subtitle}
           </p>
         </div>
+        {voiceAssistant.available && !voiceAssistant.active && mode === "bot" ? (
+          <button
+            type="button"
+            onClick={voiceAssistant.onStart}
+            className="relative flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[11.5px] font-semibold text-indigo-700 shadow-md transition hover:shadow-lg active:scale-95"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+            </svg>
+            Talk
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onClose}
@@ -231,9 +284,16 @@ export function ChatPanel({
             onRemove={onRemove}
             onCheckout={onCheckout}
             onSuggestion={onSend}
+            confirmingOrder={confirmingOrder}
+            onConfirmOrder={onConfirmOrder}
+            voiceAvailable={voiceAssistant.available && !voiceAssistant.active && mode === "bot"}
+            onStartVoice={voiceAssistant.onStart}
+            voiceActive={voiceAssistant.active}
           />
         ) : null}
       </div>
+
+      {celebration ? <Confetti key={celebration} /> : null}
 
       {toast ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-28 flex justify-center">
@@ -315,7 +375,7 @@ export function ChatPanel({
         disabled={!session || loading || Boolean(sessionError) || (sending && mode === "bot")}
         active={open && !loading}
         accent={accent}
-        placeholder={withHuman ? "Message our team…" : "Ask about a product, delivery, or your order…"}
+        placeholder={withHuman ? "Message our team…" : voiceAssistant.active ? "Or type here…" : "Ask me anything, or tap Talk…"}
         attachmentsEnabled={session?.settings.attachmentsEnabled ?? false}
         voiceEnabled={session?.settings.voiceEnabled ?? false}
         voiceSupported={voice.supported}

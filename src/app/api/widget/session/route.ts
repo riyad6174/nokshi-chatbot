@@ -16,6 +16,9 @@ import {
 import { parseJsonArray, parseJsonObject } from "@/modules/stores/store.service";
 import { isLiveAiEnabled } from "@/modules/ai/run";
 import { prisma } from "@/lib/db/prisma";
+import { env } from "@/lib/config/env";
+import { speechMode } from "@/modules/speech/config";
+import { voiceAssistantEnabled } from "@/modules/speech/greeting";
 import type { SuggestedTopic, WidgetSessionResponse } from "@/types/chat";
 
 export const runtime = "nodejs";
@@ -108,6 +111,11 @@ export async function POST(request: NextRequest) {
         settings?.fallbackMessage || "I could not find an approved answer for that. Please contact the store support team.",
       suggestedTopics: parseTopics(settings?.suggestedTopics),
       voiceEnabled: settings?.voiceEnabled ?? true,
+      voiceAssistant: {
+        enabled: voiceAssistantEnabled(context.store),
+        speech: speechMode(),
+        maxSessionMinutes: env.VOICE_MAX_SESSION_MINUTES,
+      },
       attachmentsEnabled: settings?.attachmentsEnabled ?? true,
       theme: parseTheme(settings?.widgetTheme),
       aiMode: isLiveAiEnabled(context.store) ? "live" : "demo",

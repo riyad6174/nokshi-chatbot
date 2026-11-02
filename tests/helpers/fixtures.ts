@@ -3,6 +3,8 @@ import { createSession, type SessionContext } from "@/modules/conversations/sess
 
 export async function resetDb() {
   // Children first so relation emulation has nothing left to cascade.
+  await prisma.customerEvent.deleteMany();
+  await prisma.customerProfile.deleteMany();
   await prisma.order.deleteMany();
   await prisma.upload.deleteMany();
   await prisma.checkoutSession.deleteMany();

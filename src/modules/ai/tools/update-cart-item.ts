@@ -39,7 +39,7 @@ export const updateCartItemTool: ToolDefinition = {
       });
       return success(
         { message: "Quantity updated. Totals below are authoritative.", cart: cartCompact(updated) },
-        [{ type: "cart_summary", cart: updated }],
+        [{ type: "cart_summary", cart: updated, label: "Cart updated" }],
       );
     } catch (error) {
       return cartErrorToResult(error);

@@ -81,14 +81,37 @@ export type CustomerDetailsData = {
   notes: string;
 };
 
+/** The order summary the customer confirms before a cash-on-delivery order is placed from the chat. */
+export type OrderConfirmationData = {
+  confirmationId: string;
+  lines: Array<{ name: string; variantTitle: string | null; quantity: number; unitPriceMinor: number; lineTotalMinor: number }>;
+  subtotalMinor: number;
+  shippingMinor: number;
+  totalMinor: number;
+  currency: string;
+  deliveryArea: string | null;
+  customer: CustomerDetailsData;
+  paymentMethod: "cod";
+};
+
 export type ChatPart =
   | { type: "text"; text: string }
-  | { type: "product_list"; products: ProductCardData[] }
-  | { type: "cart_summary"; cart: CartPayload }
+  /** `label` names the action for its card, e.g. "Recommended for you", "Added to cart". */
+  | { type: "product_list"; products: ProductCardData[]; label?: string }
+  | { type: "cart_summary"; cart: CartPayload; label?: string }
   | { type: "checkout_action" }
   | { type: "refine_options"; options: RefineOptions }
   | { type: "details_form"; prefill: Partial<CustomerDetailsData> }
   | { type: "order_status"; orders: OrderStatusData[] }
+  | { type: "order_confirmation"; confirmation: OrderConfirmationData }
+  /** Editable contact/delivery form; the customer sends it back as a message with the exact details. */
+  | {
+      type: "contact_form";
+      prefill: Partial<CustomerDetailsData>;
+      deliveryAreas: Array<{ id: string; label: string }>;
+      deliveryAreaId: string;
+      note: string;
+    }
   | { type: "handoff"; state: "waiting" | "joined" | "released" | "closed"; agentName?: string };
 
 export type AttachmentData = {
@@ -123,6 +146,8 @@ export type WidgetSettingsPayload = {
   fallbackMessage: string;
   suggestedTopics: SuggestedTopic[];
   voiceEnabled: boolean;
+  /** Hands-free voice assistant. speech "server": cloud STT/TTS; "browser": the browser's own recognition and voices. */
+  voiceAssistant: { enabled: boolean; speech: "server" | "browser"; maxSessionMinutes: number };
   attachmentsEnabled: boolean;
   theme: { accent?: string; position?: "left" | "right" };
   aiMode: "live" | "demo";

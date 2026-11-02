@@ -3,6 +3,7 @@ import type { Cart, CustomerDetails, Store } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { logger } from "@/lib/logging/logger";
 import { getCartForCheckout } from "@/modules/cart/cart.service";
+import { trackEvent } from "@/modules/customers/events.service";
 import type { CheckoutLine } from "@/modules/commerce/commerce-adapter";
 import { assertTrustedCheckoutUrl } from "@/modules/commerce/checkout-url";
 import { CheckoutValidationError, createInternalCommerceAdapter } from "@/modules/commerce/internal.adapter";
@@ -116,6 +117,13 @@ export async function prepareCheckoutForSession(input: {
       },
     });
 
+    await trackEvent({
+      storeId: input.store.id,
+      sessionId: input.sessionId,
+      type: "checkout_started",
+      cartId: cart.id,
+      valueMinor: prepared.subtotalMinor,
+    });
     logger.info("checkout.prepared", {
       storeId: input.store.id,
       checkoutSessionId: session.id,

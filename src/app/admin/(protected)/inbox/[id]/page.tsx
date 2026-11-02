@@ -31,6 +31,10 @@ function describePart(part: ChatPart): string | null {
       return `Offered filters: ${part.options.facets.map((facet) => `${facet.name} (${facet.values.join(", ")})`).join("; ")}`;
     case "order_status":
       return part.orders.map((order) => `Order ${order.orderNumber}: ${order.statusLabel}`).join("; ");
+    case "contact_form":
+      return "Asked the customer to check their contact details";
+    case "order_confirmation":
+      return `Order summary to confirm (cash on delivery): ${formatMinor(part.confirmation.totalMinor, part.confirmation.currency)} to ${part.confirmation.customer.name}, ${part.confirmation.customer.phone}`;
     default:
       return null;
   }

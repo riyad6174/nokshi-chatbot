@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { variantAvailable, variantPriceMinor, type ProductWithVariants } from "@/modules/catalog/product.service";
+import { trackEvent } from "@/modules/customers/events.service";
 import type { CartPayload } from "@/types/chat";
 import { isObjectId } from "@/lib/db/ids";
 
@@ -98,18 +99,44 @@ export async function getCartForCheckout(sessionId: string, storeId: string) {
   return cart;
 }
 
+function variantChoices(product: ProductWithVariants) {
+  return product.variants.map((variant) => ({
+    id: variant.id,
+    title: variant.title,
+    available: variantAvailable(variant),
+    priceMinor: variantPriceMinor(product, variant),
+  }));
+}
+
+/**
+ * The variant to add. With no variant given, a product with only one variant in stock gets that one
+ * (sold-out versions aren't a real choice). A sold-out variant is refused with the in-stock ones
+ * listed, so the caller can tell "this version is sold out" from "this product is sold out".
+ */
 function resolveVariant(product: ProductWithVariants, variantId?: string | null) {
   if (variantId) {
     const variant = product.variants.find((entry) => entry.id === variantId);
     if (!variant) {
       throw new CartError("variant_not_found", "That variant does not belong to this product.");
     }
+    if (!variantAvailable(variant)) {
+      const inStock = product.variants.filter(variantAvailable);
+      throw new CartError(
+        "variant_unavailable",
+        inStock.length > 0
+          ? `Only the "${variant.title}" version is out of stock. The product is available in: ${inStock.map((entry) => entry.title).join(", ")}.`
+          : "That variant is currently out of stock.",
+        { requested: variant.title, availableVariants: variantChoices(product).filter((choice) => choice.available) },
+      );
+    }
     return variant;
   }
   if (product.variants.length === 0) return null;
   if (product.variants.length === 1) return product.variants[0];
-  throw new CartError("variant_required", "This product has multiple variants. Ask the customer to choose one.", {
-    variants: product.variants.map((variant) => ({ id: variant.id, title: variant.title, priceMinor: variantPriceMinor(product, variant) })),
+  const inStock = product.variants.filter(variantAvailable);
+  if (inStock.length === 1) return inStock[0];
+  throw new CartError("variant_required", "This product has multiple variants in stock. Ask the customer to choose one.", {
+    variants: variantChoices(product),
   });
 }
 
@@ -142,7 +169,7 @@ export async function addItem(input: {
 
   const variant = resolveVariant(product, input.variantId);
   if (variant && !variantAvailable(variant)) {
-    throw new CartError("variant_unavailable", "That variant is currently out of stock.");
+    throw new CartError("out_of_stock", "This product is currently out of stock.");
   }
 
   const cart = await getOrCreateActiveCart(input.sessionId, input.storeId, input.currency);
@@ -177,6 +204,15 @@ export async function addItem(input: {
 
   await prisma.cart.update({ where: { id: cart.id }, data: { updatedAt: new Date() } });
   const updated = await prisma.cart.findUniqueOrThrow({ where: { id: cart.id }, include: cartInclude });
+  await trackEvent({
+    storeId: input.storeId,
+    sessionId: input.sessionId,
+    type: "added_to_cart",
+    productId: product.id,
+    cartId: cart.id,
+    valueMinor: variantPriceMinor(product, variant) * input.quantity,
+    meta: { variantId: variant?.id ?? null, quantity: input.quantity },
+  });
   return buildSummary(updated);
 }
 
@@ -233,6 +269,13 @@ export async function removeItem(input: {
   await prisma.cartItem.delete({ where: { id: item.id } });
   await prisma.cart.update({ where: { id: cart.id }, data: { updatedAt: new Date() } });
   const updated = await prisma.cart.findUniqueOrThrow({ where: { id: cart.id }, include: cartInclude });
+  await trackEvent({
+    storeId: input.storeId,
+    sessionId: input.sessionId,
+    type: "removed_from_cart",
+    productId: item.productId,
+    cartId: cart.id,
+  });
   return buildSummary(updated);
 }
 

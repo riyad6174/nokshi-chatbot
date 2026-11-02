@@ -3,6 +3,7 @@ import { runLiveAssistant, type AssistantHistoryMessage } from "@/modules/ai/orc
 import { runDemoAssistant } from "@/modules/ai/demo-assistant";
 import { resolveAiConfig } from "@/modules/ai/config";
 import type { SessionContext } from "@/modules/conversations/session.service";
+import type { TurnChannel } from "@/modules/conversations/turn.service";
 import type { StoreWithSettings } from "@/modules/stores/store.service";
 import type { CartPayload } from "@/types/chat";
 
@@ -15,6 +16,7 @@ export function runAssistant(input: {
   cart: CartPayload;
   history: AssistantHistoryMessage[];
   userText: string;
+  channel?: TurnChannel;
   signal?: AbortSignal;
 }): AsyncGenerator<OrchestratorEvent> {
   const config = resolveAiConfig(input.session.store.settings);
@@ -24,6 +26,7 @@ export function runAssistant(input: {
       cart: input.cart,
       history: input.history,
       config,
+      channel: input.channel ?? "text",
       signal: input.signal,
     });
   }

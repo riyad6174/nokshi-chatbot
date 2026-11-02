@@ -3,9 +3,13 @@ import type { AiConfig } from "@/modules/ai/config";
 import type { ProviderMessage, ProviderToolCall } from "@/modules/ai/provider";
 import { streamCompletion } from "@/modules/ai/provider";
 import { buildSystemInstructions } from "@/modules/ai/system-instructions";
+import { describeOpenProposal } from "@/modules/orders/voice-order.service";
+import { savedDetailsForVisitor } from "@/modules/customers/profile.service";
+import { detectLang } from "@/modules/speech/speech-provider";
 import { executeTool, getProviderTools } from "@/modules/ai/tools";
 import type { ToolContext } from "@/modules/ai/tools/types";
 import type { SessionContext } from "@/modules/conversations/session.service";
+import type { TurnChannel } from "@/modules/conversations/turn.service";
 import type { CartPayload, ChatPart } from "@/types/chat";
 
 export type OrchestratorEvent =
@@ -73,16 +77,32 @@ export async function* runLiveAssistant(input: {
   cart: CartPayload;
   history: AssistantHistoryMessage[];
   config: AiConfig;
+  channel?: TurnChannel;
   signal?: AbortSignal;
 }): AsyncGenerator<OrchestratorEvent> {
-  const toolContext: ToolContext = { session: input.session };
+  const latestUserText = [...input.history].reverse().find((message) => message.role === "user")?.content ?? "";
+  const toolContext: ToolContext = {
+    session: input.session,
+    turnStartedAt: new Date(),
+    channel: input.channel ?? "text",
+    latestUserText,
+  };
   const tools = getProviderTools();
   const settings = input.session.store.settings;
+  const [openOrder, savedDetails] = await Promise.all([
+    describeOpenProposal(input.session).catch(() => null),
+    savedDetailsForVisitor(input.session.storeId, input.session.visitorId).catch(() => null),
+  ]);
+  const latestUser = [...input.history].reverse().find((message) => message.role === "user")?.content ?? "";
   const system = buildSystemInstructions({
+    openOrder,
+    savedDetails,
+    replyLanguage: detectLang(latestUser, input.session.locale.startsWith("bn") ? "bn" : "en"),
     session: input.session,
     cart: input.cart,
     configuredInstructions: settings?.systemInstructions,
     enabledFeatures: settings?.enabledFeatures,
+    channel: input.channel ?? "text",
   });
 
   const messages: ProviderMessage[] = [

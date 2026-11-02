@@ -41,7 +41,7 @@ export const prepareCheckoutTool: ToolDefinition = {
           cart: cartCompact(summary),
           note: "Some items changed. Explain the issue and ask the customer to update the cart.",
         },
-        [{ type: "cart_summary", cart: summary }],
+        [{ type: "cart_summary", cart: summary, label: "Ready for checkout" }],
       );
     }
 
@@ -59,7 +59,7 @@ export const prepareCheckoutTool: ToolDefinition = {
         note: "Cart validated. A delivery-details form is shown in the chat. Ask the customer to confirm and fill it in (or type name, phone and address, then call save_customer_details). The order is placed on the checkout page, never in chat.",
       },
       [
-        { type: "cart_summary", cart: summary },
+        { type: "cart_summary", cart: summary, label: "Ready for checkout" },
         { type: "details_form", prefill: previous?.customer ?? {} },
       ],
     );

@@ -12,11 +12,17 @@ import { updateCartItemTool } from "@/modules/ai/tools/update-cart-item";
 import { saveCustomerDetailsTool } from "@/modules/ai/tools/save-customer-details";
 import { getOrderStatusTool } from "@/modules/ai/tools/get-order-status";
 import { requestHumanTool } from "@/modules/ai/tools/request-human";
+import { proposeOrderTool } from "@/modules/ai/tools/propose-order";
+import { confirmOrderTool } from "@/modules/ai/tools/confirm-order";
+import { getRecommendationsTool } from "@/modules/ai/tools/get-recommendations";
+import { saveCustomerProfileTool } from "@/modules/ai/tools/save-customer-profile";
+import { collectContactDetailsTool } from "@/modules/ai/tools/collect-contact-details";
 import type { ToolContext, ToolDefinition, ToolExecutionResult } from "@/modules/ai/tools/types";
 
 const tools: ToolDefinition[] = [
   searchProductsTool,
   getProductDetailsTool,
+  getRecommendationsTool,
   searchKnowledgeTool,
   getCartTool,
   addToCartTool,
@@ -24,6 +30,10 @@ const tools: ToolDefinition[] = [
   removeCartItemTool,
   prepareCheckoutTool,
   saveCustomerDetailsTool,
+  proposeOrderTool,
+  confirmOrderTool,
+  saveCustomerProfileTool,
+  collectContactDetailsTool,
   getOrderStatusTool,
   requestHumanTool,
 ];

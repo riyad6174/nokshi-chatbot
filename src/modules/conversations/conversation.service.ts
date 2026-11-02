@@ -100,8 +100,10 @@ export async function listConversationMessages(
   return rows.map(toChatMessage);
 }
 
-function describeAttachments(attachments: MessageAttachment[]): string {
+function describeAttachments(attachments: MessageAttachment[], content: string): string {
   return attachments
+    // A spoken turn stores its transcript as the message text too; don't repeat it.
+    .filter((attachment) => !(attachment.kind === "audio" && attachment.transcript && attachment.transcript === content))
     .map((attachment) => {
       if (attachment.kind === "audio") {
         return attachment.transcript
@@ -124,7 +126,7 @@ export async function getProviderHistory(conversationId: string, limit = 20) {
     .reverse()
     .map((row) => {
       if (row.role === "user") {
-        const extra = describeAttachments(row.attachments);
+        const extra = describeAttachments(row.attachments, row.content);
         return { role: "user" as const, content: [row.content, extra].filter(Boolean).join("\n") };
       }
       const prefix = row.role === "agent" ? `[Reply from store staff${row.senderName ? ` ${row.senderName}` : ""}] ` : "";

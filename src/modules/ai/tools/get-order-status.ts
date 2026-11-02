@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { formatMinor } from "@/lib/money";
+import { priceLabel } from "@/lib/money";
 import { failure, success } from "@/modules/ai/tools/helpers";
 import type { ToolDefinition } from "@/modules/ai/tools/types";
 import { findOrdersForCustomer, toOrderStatusData } from "@/modules/orders/order.service";
@@ -50,7 +50,7 @@ export const getOrderStatusTool: ToolDefinition = {
           orderNumber: order.orderNumber,
           status: order.statusLabel,
           placedAt: order.placedAt,
-          total: formatMinor(order.totalMinor, order.currency),
+          total: priceLabel(order.totalMinor, order.currency),
           payment: order.paymentMethod === "cod" ? `cash on delivery (${order.paymentStatus})` : order.paymentStatus,
           trackingNumber: order.trackingNumber || null,
           items: order.items.map((item) => `${item.quantity} × ${item.name}${item.variantTitle ? ` (${item.variantTitle})` : ""}`),

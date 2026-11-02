@@ -4,6 +4,7 @@ import { failure, success } from "@/modules/ai/tools/helpers";
 import type { ToolDefinition } from "@/modules/ai/tools/types";
 import { CheckoutError, prepareCheckoutForSession, saveCheckoutCustomer } from "@/modules/commerce/checkout.service";
 import { UntrustedCheckoutUrlError } from "@/modules/commerce/checkout-url";
+import { upsertProfile } from "@/modules/customers/profile.service";
 
 const schema = customerDetailsSchema.extend({
   email: z.string().trim().max(200).optional().default(""),
@@ -41,6 +42,17 @@ export const saveCustomerDetailsTool: ToolDefinition = {
     try {
       const prepared = await prepareCheckoutForSession({ sessionId: ctx.session.sessionId, store: ctx.session.store });
       await saveCheckoutCustomer(prepared.checkoutSessionId, parsed.data);
+      await upsertProfile(
+        { storeId: ctx.session.storeId, visitorId: ctx.session.visitorId },
+        {
+          name: parsed.data.name,
+          phone: parsed.data.phone,
+          email: parsed.data.email || undefined,
+          address: parsed.data.address,
+          city: parsed.data.city || undefined,
+          preferredLocale: ctx.session.locale,
+        },
+      );
       return success(
         {
           saved: true,

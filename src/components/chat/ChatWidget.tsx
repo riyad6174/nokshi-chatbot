@@ -4,6 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PendingAttachment } from "@/components/chat/ChatComposer";
 import { ChatPanel, type ChatUiError } from "@/components/chat/ChatPanel";
 import { useVoiceRecorder } from "@/components/chat/useVoiceRecorder";
+import { AssistantOrb, type OrbState } from "@/components/chat/AssistantOrb";
+import { VoiceControlCard } from "@/components/chat/VoiceControlCard";
+import { WelcomeBubble } from "@/components/chat/WelcomeBubble";
+import {
+  useVoiceSession,
+  voiceSupport,
+  type SpokenSentence,
+  type Utterance,
+  type VoiceLang,
+  type VoiceTurn,
+} from "@/components/chat/useVoiceSession";
 import { streamSse } from "@/lib/client/sse";
 import type {
   CartPayload,
@@ -32,6 +43,26 @@ function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMes
   return fresh.length === 0 ? current : [...current, ...fresh];
 }
 
+const VISITOR_KEY = "nokshi:visitor-id";
+
+// The visitor id links a returning shopper to their saved details. Storage may be unavailable
+// (private mode); the chat still works, the shopper just isn't recognized next time.
+function readVisitorId(): string | null {
+  try {
+    return window.localStorage.getItem(VISITOR_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storeVisitorId(visitorId: string) {
+  try {
+    window.localStorage.setItem(VISITOR_KEY, visitorId);
+  } catch {
+    // Not remembered; see readVisitorId.
+  }
+}
+
 function kindOf(file: File): "image" | "file" {
   return file.type.startsWith("image/") ? "image" : "file";
 }
@@ -58,6 +89,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const sessionRef = useRef<WidgetSessionResponse | null>(null);
   const loadingRef = useRef(false);
   const sendingRef = useRef(false);
+  const inflightRef = useRef(0);
   const checkoutBusyRef = useRef(false);
   const lastSeenRef = useRef<string | null>(null);
   const openRef = useRef(open);
@@ -81,11 +113,12 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       const response = await fetch("/api/widget/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ widgetKey: WIDGET_KEY, visitorId: null, locale, productId }),
+        body: JSON.stringify({ widgetKey: WIDGET_KEY, visitorId: readVisitorId(), locale, productId }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.error?.message || "Could not start the chat.");
       const data = body as WidgetSessionResponse;
+      storeVisitorId(data.visitorId);
       sessionRef.current = data;
       greetedProductRef.current = productId;
       setSession(data);
@@ -171,41 +204,38 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     };
   }, [session, mode, open, noteLatest]);
 
-  const sendMessage = useCallback(
-    async (raw: string, extraAttachments: Array<{ uploadId: string; transcript?: string; durationMs?: number }> = []) => {
-      const text = raw.trim();
-      const ready = pending.filter((item) => item.status === "ready" && item.uploadId);
-      const attachments = [...ready.map((item) => ({ uploadId: item.uploadId! })), ...extraAttachments];
-      if ((!text && attachments.length === 0) || sendingRef.current) return;
-
+  /**
+   * Posts one customer turn and renders the streamed reply. Shared by typed messages and voice turns.
+   * `optimisticUser` shows the customer's message immediately; voice turns pass null and get it
+   * (with the transcript) from message.started.
+   */
+  const deliverTurn = useCallback(
+    async (input: {
+      optimisticUser: ChatMessage | null;
+      retryText?: string;
+      post: (active: WidgetSessionResponse) => Promise<Response>;
+      onEvent?: (event: string, data: unknown) => void;
+      /** A voice turn the server didn't accept (422): nothing heard, echo, or "say it again". */
+      onRejected?: (body: unknown) => void;
+      signal?: AbortSignal;
+    }) => {
       let activeSession = sessionRef.current ?? (await initSession());
       if (!activeSession) return;
 
+      inflightRef.current += 1;
       sendingRef.current = true;
       setSending(true);
       setError(null);
-      setDraft("");
-      setPending((current) => current.filter((item) => item.status === "error"));
 
       const timestamp = Date.now();
-      const pendingId = `pending-${timestamp}`;
-      const userTempId = `user-${timestamp}`;
-      const userMessage: ChatMessage = {
-        id: userTempId,
-        role: "user",
-        parts: text ? [{ type: "text", text }] : [],
-        attachments: ready.map((item) => ({
-          uploadId: item.uploadId!,
-          name: item.name,
-          mime: "",
-          size: 0,
-          kind: item.kind,
-          url: item.previewUrl ?? `/api/widget/uploads/${item.uploadId}`,
-        })),
-        createdAt: new Date(timestamp).toISOString(),
-      };
+      const pendingId = `pending-${timestamp}-${inflightRef.current}`;
+      const userTempId = input.optimisticUser?.id ?? null;
       const pendingMessage: ChatMessage = { id: pendingId, role: "assistant", parts: [], createdAt: new Date(timestamp).toISOString() };
-      setMessages((previous) => [...previous, userMessage, ...(mode === "bot" ? [pendingMessage] : [])]);
+      setMessages((previous) => [
+        ...previous,
+        ...(input.optimisticUser ? [input.optimisticUser] : []),
+        ...(mode === "bot" ? [pendingMessage] : []),
+      ]);
 
       const appendText = (chunk: string) => {
         setMessages((previous) =>
@@ -224,22 +254,23 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           previous.map((message) => (message.id === pendingId ? { ...message, parts: [...message.parts, part] } : message)),
         );
       };
-
-      const post = () =>
-        fetch("/api/widget/message", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ conversationId: activeSession!.conversationId, message: text, locale: activeSession!.locale, attachments }),
-        });
+      const dropEmptyPending = () =>
+        setMessages((previous) => previous.filter((message) => message.id !== pendingId || message.parts.length > 0));
 
       try {
-        let response = await post();
+        let response = await input.post(activeSession);
         if (response.status === 401 || response.status === 409) {
           // Session expired or the conversation was closed by the team: start fresh and resend once.
           sessionRef.current = null;
           activeSession = await initSession();
           if (!activeSession) throw new Error("Your chat session expired. Please try again.");
-          response = await post();
+          response = await input.post(activeSession);
+        }
+        if (response.status === 422) {
+          // Voice turn where nothing intelligible was heard.
+          dropEmptyPending();
+          input.onRejected?.(await response.json().catch(() => null));
+          return;
         }
         if (!response.ok) {
           const body = await response.json().catch(() => null);
@@ -247,12 +278,20 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         }
 
         await streamSse(response, (event, data) => {
+          input.onEvent?.(event, data);
           if (event === "message.started") {
             const real = (data as { userMessage?: ChatMessage })?.userMessage;
             if (real) {
-              setMessages((previous) =>
-                previous.map((message) => (message.id === userTempId ? { ...real, attachments: real.attachments ?? message.attachments } : message)),
-              );
+              setMessages((previous) => {
+                if (userTempId && previous.some((message) => message.id === userTempId)) {
+                  return previous.map((message) =>
+                    message.id === userTempId ? { ...real, attachments: real.attachments ?? message.attachments } : message,
+                  );
+                }
+                // Voice turn: the customer's words arrive with the reply; show them above it.
+                const at = previous.findIndex((message) => message.id === pendingId);
+                return at === -1 ? [...previous, real] : [...previous.slice(0, at), real, ...previous.slice(at)];
+              });
             }
           } else if (event === "message.delta") {
             const chunk = (data as { text?: string })?.text;
@@ -266,6 +305,13 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           } else if (event === "message.event") {
             const message = (data as { message?: ChatMessage })?.message;
             if (message) setMessages((previous) => mergeMessages(previous, [message]));
+            // An order was placed during this turn: the cart was checked out.
+            if (message?.parts.some((part) => part.type === "order_status")) {
+              void fetch("/api/widget/cart")
+                .then((cartResponse) => cartResponse.json())
+                .then((body: { cart?: CartPayload }) => body?.cart && setCart(body.cart))
+                .catch(() => undefined);
+            }
           } else if (event === "conversation.mode") {
             const next = (data as { mode?: ConversationMode })?.mode;
             if (next) setMode(next);
@@ -283,9 +329,14 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           }
         });
         // Drop an empty placeholder (e.g. when a human is handling the chat).
-        setMessages((previous) => previous.filter((message) => message.id !== pendingId || message.parts.length > 0));
+        dropEmptyPending();
       } catch (caught) {
-        setError({ message: errorMessage(caught, "The reply failed. Please try again."), retryText: text || undefined });
+        if (input.signal?.aborted) {
+          // The customer talked over the assistant: keep what was already said, start the next turn.
+          dropEmptyPending();
+          return;
+        }
+        setError({ message: errorMessage(caught, "The reply failed. Please try again."), retryText: input.retryText });
         setMessages((previous) =>
           previous.map((message) =>
             message.id === pendingId && message.parts.length === 0
@@ -294,12 +345,217 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           ),
         );
       } finally {
-        sendingRef.current = false;
-        setSending(false);
+        inflightRef.current -= 1;
+        if (inflightRef.current === 0) {
+          sendingRef.current = false;
+          setSending(false);
+        }
       }
     },
-    [initSession, mode, noteLatest, pending],
+    [initSession, mode, noteLatest],
   );
+
+  const sendMessage = useCallback(
+    async (raw: string, extraAttachments: Array<{ uploadId: string; transcript?: string; durationMs?: number }> = []) => {
+      const text = raw.trim();
+      const ready = pending.filter((item) => item.status === "ready" && item.uploadId);
+      const attachments = [...ready.map((item) => ({ uploadId: item.uploadId! })), ...extraAttachments];
+      if ((!text && attachments.length === 0) || sendingRef.current) return;
+
+      setDraft("");
+      setPending((current) => current.filter((item) => item.status === "error"));
+
+      const timestamp = Date.now();
+      const userMessage: ChatMessage = {
+        id: `user-${timestamp}`,
+        role: "user",
+        parts: text ? [{ type: "text", text }] : [],
+        attachments: ready.map((item) => ({
+          uploadId: item.uploadId!,
+          name: item.name,
+          mime: "",
+          size: 0,
+          kind: item.kind,
+          url: item.previewUrl ?? `/api/widget/uploads/${item.uploadId}`,
+        })),
+        createdAt: new Date(timestamp).toISOString(),
+      };
+
+      await deliverTurn({
+        optimisticUser: userMessage,
+        retryText: text || undefined,
+        post: (active) =>
+          fetch("/api/widget/message", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversationId: active.conversationId, message: text, locale: active.locale, attachments }),
+          }),
+      });
+    },
+    [deliverTurn, pending],
+  );
+
+  const voiceLangRef = useRef<VoiceLang>("bn");
+  const setVoiceLangRef = useRef<(lang: VoiceLang) => void>(() => undefined);
+
+  const sendVoiceTurn = useCallback(
+    async (utterance: Utterance, turn: VoiceTurn) => {
+      const spokenLangs: Record<VoiceLang, number> = { en: 0, bn: 0 };
+      await deliverTurn({
+        optimisticUser: null,
+        signal: turn.signal,
+        post: (active) => {
+          const form = new FormData();
+          form.append("conversationId", active.conversationId);
+          form.append("lang", voiceLangRef.current);
+          form.append("durationMs", String(Math.round(utterance.durationMs)));
+          if (utterance.assistantSaid) form.append("assistantSaid", utterance.assistantSaid.slice(-1000));
+          if (utterance.transcript) form.append("transcript", utterance.transcript);
+          if (utterance.audio) form.append("audio", utterance.audio, "utterance.wav");
+          return fetch("/api/widget/voice/turn", { method: "POST", body: form, signal: turn.signal });
+        },
+        onRejected: (body) => {
+          const speech = (body as { speech?: SpokenSentence } | null)?.speech;
+          if (speech?.text) turn.speak(speech);
+        },
+        onEvent: (event, data) => {
+          if (event !== "voice.sentence") return;
+          const sentence = data as SpokenSentence;
+          spokenLangs[sentence.lang] += sentence.text.length;
+          turn.speak(sentence);
+        },
+      });
+      const replyLang: VoiceLang = spokenLangs.bn > spokenLangs.en ? "bn" : "en";
+      if (!turn.signal.aborted && spokenLangs[replyLang] > 0 && replyLang !== voiceLangRef.current) {
+        setVoiceLangRef.current(replyLang);
+      }
+    },
+    [deliverTurn],
+  );
+
+  const voiceSession = useVoiceSession({ onUtterance: sendVoiceTurn });
+  voiceLangRef.current = voiceSession.lang;
+  setVoiceLangRef.current = voiceSession.setLang;
+  const [voiceCaps, setVoiceCaps] = useState({ server: false, browser: false });
+
+  useEffect(() => setVoiceCaps(voiceSupport()), []);
+
+  const voiceConfig = session?.settings.voiceAssistant;
+  const voiceSpeech: "server" | "browser" | null = !voiceConfig?.enabled
+    ? null
+    : voiceConfig.speech === "server" && voiceCaps.server
+      ? "server"
+      : voiceCaps.browser
+        ? "browser"
+        : null;
+
+  const startVoiceAssistant = useCallback(async () => {
+    // Inside the click: unlock audio before anything is awaited.
+    voiceSession.prime();
+    setOpen(true);
+    const active = sessionRef.current ?? (await initSession());
+    if (!active) return;
+    const caps = voiceSupport();
+    const configured = active.settings.voiceAssistant;
+    const speech = configured.speech === "server" && caps.server ? "server" : caps.browser ? "browser" : null;
+    if (!configured.enabled || !speech) {
+      setError({ message: "Voice isn't supported in this browser. Try Chrome or Edge, or keep chatting by text." });
+      return;
+    }
+    const lang: VoiceLang = active.store.supportedLocales.some((locale) => locale.startsWith("bn")) ? "bn" : "en";
+    const started = await voiceSession.start({ speech, lang, maxSessionMinutes: configured.maxSessionMinutes });
+    if (!started) return;
+    try {
+      const params = new URLSearchParams({ widgetKey: WIDGET_KEY, lang, kind: "start" });
+      const response = await fetch(`/api/widget/voice/greeting?${params}`);
+      const body = await response.json().catch(() => null);
+      if (response.ok && body?.enabled) voiceSession.say({ text: body.text, lang, audio: body.audio, mime: body.mime });
+    } catch {
+      // The opener is optional; the assistant is already listening.
+    }
+  }, [initSession, voiceSession]);
+
+  useEffect(() => {
+    const onStartVoice = () => void startVoiceAssistant();
+    window.addEventListener("nokshi:start-voice", onStartVoice);
+    return () => window.removeEventListener("nokshi:start-voice", onStartVoice);
+  }, [startVoiceAssistant]);
+
+  useEffect(() => {
+    if (voiceSession.error) setError({ message: voiceSession.error });
+  }, [voiceSession.error]);
+
+  const [confirmingOrder, setConfirmingOrder] = useState(false);
+
+  const confirmOrder = useCallback(
+    async (confirmationId: string) => {
+      if (confirmingOrder) return;
+      setConfirmingOrder(true);
+      setError(null);
+      voiceSession.interrupt();
+      try {
+        const response = await fetch("/api/widget/orders/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirmationId, voice: voiceSession.active, lang: voiceSession.lang }),
+        });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.error?.message || "The order could not be placed. Nothing was charged.");
+        const fresh = (body.messages ?? []) as ChatMessage[];
+        setMessages((previous) => {
+          const merged = mergeMessages(previous, fresh);
+          noteLatest(merged);
+          return merged;
+        });
+        if (body.cart) setCart(body.cart as CartPayload);
+        if (body.speech && voiceSession.active) voiceSession.say(body.speech as SpokenSentence);
+      } catch (caught) {
+        setError({ message: errorMessage(caught, "The order could not be placed. Nothing was charged.") });
+      } finally {
+        setConfirmingOrder(false);
+      }
+    },
+    [confirmingOrder, noteLatest, voiceSession],
+  );
+
+  const [welcomeSpeaking, setWelcomeSpeaking] = useState(false);
+
+  // One animated orb at a time: the launcher while the chat is closed, the header orb (only while
+  // talking) once it's open.
+  const talking = voiceSession.active && ["hearing", "thinking", "speaking", "listening"].includes(voiceSession.phase);
+  const headerOrbState: OrbState = talking ? (voiceSession.phase as OrbState) : "still";
+  const launcherOrbState: OrbState = welcomeSpeaking ? "speaking" : "idle";
+
+  // Typed text (composer, chips, forms) during voice mode goes through the voice turn so the answer is spoken.
+  const sendTyped = useCallback(
+    (text: string) => {
+      if (voiceSession.active && text.trim() && mode === "bot") void voiceSession.submitText(text.trim());
+      else void sendMessage(text);
+    },
+    [mode, sendMessage, voiceSession],
+  );
+
+  // Once an order is placed, voice mode ends after the confirmation is spoken; the chat stays open
+  // with the success card. Orders already in the history when the chat loads don't count.
+  const lastPlacedRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const placed = [...messages]
+      .reverse()
+      .find((message) => message.role === "event" && message.parts.some((part) => part.type === "order_status" && part.orders.some((order) => order.status === "placed")));
+    if (lastPlacedRef.current === undefined) {
+      if (messages.length > 0) lastPlacedRef.current = placed?.id ?? null;
+      return;
+    }
+    if (placed && placed.id !== lastPlacedRef.current) {
+      lastPlacedRef.current = placed.id;
+      if (voiceSession.active) voiceSession.finishAfterSpeech();
+    }
+  }, [messages, voiceSession]);
+
+  const closePanel = useCallback(() => {
+    if (voiceSession.active) voiceSession.stop();
+    setOpen(false);
+  }, [voiceSession]);
 
   const uploadFile = useCallback(async (file: Blob, name: string): Promise<{ uploadId: string } | { error: string }> => {
     const form = new FormData();
@@ -482,9 +738,18 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
 
   return (
     <>
+      <WelcomeBubble
+        widgetKey={WIDGET_KEY}
+        suppressed={open || voiceSession.active}
+        accent={accent}
+        position={position}
+        onSpeakingChange={setWelcomeSpeaking}
+        onTalk={() => void startVoiceAssistant()}
+        onChat={() => setOpen(true)}
+      />
       <ChatPanel
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={closePanel}
         session={session}
         mode={mode}
         agentName={agentName}
@@ -514,7 +779,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         }}
         onPickFiles={(files) => void pickFiles(files)}
         onRemovePending={(localId) => setPending((current) => current.filter((item) => item.localId !== localId))}
-        onSend={(text) => void sendMessage(text)}
+        onSend={sendTyped}
         onRetry={() => {
           if (error?.retryText) void sendMessage(error.retryText);
         }}
@@ -527,37 +792,73 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         onUpdate={updateQuantity}
         onRemove={removeCartItem}
         onCheckout={(details) => void startCheckout(details)}
+        orbState={headerOrbState}
+        confirmingOrder={confirmingOrder}
+        onConfirmOrder={(confirmationId) => void confirmOrder(confirmationId)}
+        voiceAssistant={{
+          available: Boolean(voiceSpeech),
+          active: voiceSession.active,
+          onStart: () => void startVoiceAssistant(),
+        }}
       />
+
+      {voiceSession.active && open ? (
+        <VoiceControlCard
+          phase={voiceSession.phase}
+          level={voiceSession.level}
+          lang={voiceSession.lang}
+          supportsBangla={session?.store.supportedLocales.some((locale) => locale.startsWith("bn")) ?? false}
+          position={position}
+          onLang={voiceSession.setLang}
+          onInterrupt={voiceSession.interrupt}
+          onPause={voiceSession.pause}
+          onResume={voiceSession.resume}
+          onStop={voiceSession.stop}
+        />
+      ) : null}
 
       <button
         type="button"
         onClick={() => {
-          setOpen((value) => !value);
+          if (open) closePanel();
+          else setOpen(true);
           setError(null);
         }}
-        aria-label={open ? "Close shopping assistant" : "Open shopping assistant"}
+        aria-label={open ? "Close shopping assistant" : "Open AI shopping assistant"}
         aria-expanded={open}
-        className={`fixed bottom-5 z-40 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition duration-200 hover:scale-105 hover:shadow-xl active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+        className={`fixed bottom-5 z-[60] rounded-full transition duration-200 hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
           position === "left" ? "left-5" : "right-5"
         }`}
-        style={{ backgroundColor: accent }}
       >
-        {!open && unread === 0 ? (
-          <span className="pointer-events-none absolute inset-0 animate-pulse-ring rounded-full" style={{ backgroundColor: accent }} aria-hidden="true" />
-        ) : null}
-        <span key={open ? "close" : "open"} className="relative animate-pop">
-          {open ? (
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+        {open ? (
+          // Inside the open chat only the header orb moves; the launcher is a plain close button.
+          <span className="flex h-[60px] w-[60px] animate-pop items-center justify-center rounded-full bg-stone-900 text-white shadow-lg">
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.4">
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
-          ) : (
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.6 8.6 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8A8.4 8.4 0 0 1 12.5 3a8.4 8.4 0 0 1 8.5 8.5Z" />
-            </svg>
-          )}
-        </span>
+          </span>
+        ) : (
+          <>
+            <AssistantOrb size={60} state={launcherOrbState} accent={accent} />
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center gap-[3px] text-white drop-shadow">
+              {launcherOrbState === "speaking" ? (
+                [0, 1, 2, 3, 4].map((bar) => (
+                  <span key={bar} className="voice-bar h-5" style={{ animationDelay: `${bar * 110}ms` }} aria-hidden="true" />
+                ))
+              ) : (
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 opacity-90" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <rect x="9" y="3" width="6" height="11" rx="3" />
+                  <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+                </svg>
+              )}
+            </span>
+          </>
+        )}
         {!open && unread > 0 ? (
-          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 animate-pop items-center justify-center rounded-full bg-red-500 px-1 text-[10.5px] font-bold" aria-label={`${unread} new messages`}>
+          <span
+            className="absolute -right-1 -top-1 flex h-5 min-w-5 animate-pop items-center justify-center rounded-full bg-red-500 px-1 text-[10.5px] font-bold text-white"
+            aria-label={`${unread} new messages`}
+          >
             {unread}
           </span>
         ) : null}

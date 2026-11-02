@@ -56,6 +56,23 @@ const config: Config = {
           "25%": { transform: "rotate(-8deg)" },
           "75%": { transform: "rotate(8deg)" },
         },
+        // Welcome bubble: drops in, then nudges for attention.
+        "bubble-drop": {
+          "0%": { opacity: "0", transform: "translateY(18px) scale(0.9)" },
+          "60%": { opacity: "1", transform: "translateY(-4px) scale(1.02)" },
+          "80%": { transform: "translateY(0) rotate(-1.5deg)" },
+          "90%": { transform: "rotate(1.5deg)" },
+          "100%": { transform: "translateY(0) scale(1) rotate(0)" },
+        },
+        // The newest action card: a soft glow that settles.
+        "action-glow": {
+          "0%": { boxShadow: "0 0 0 0 var(--glow, rgba(15,118,110,0.45))" },
+          "100%": { boxShadow: "0 0 0 10px rgba(0,0,0,0)" },
+        },
+        "slide-in": {
+          "0%": { opacity: "0", transform: "translateY(10px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         "fade-up": "fade-up 180ms ease-out",
@@ -67,6 +84,9 @@ const config: Config = {
         "pulse-ring": "pulse-ring 1.6s ease-out infinite",
         shimmer: "shimmer 1.6s linear infinite",
         wiggle: "wiggle 400ms ease-in-out",
+        "bubble-drop": "bubble-drop 700ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both",
+        "action-glow": "action-glow 1.4s ease-out 2",
+        "slide-in": "slide-in 260ms ease-out both",
       },
     },
   },

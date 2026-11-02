@@ -38,6 +38,8 @@ model Store {
   checkouts     CheckoutSession[]
   orders        Order[]
   uploads       Upload[]
+  customers     CustomerProfile[]
+  events        CustomerEvent[]
 
   @@index([websiteDomain])
 }
@@ -67,6 +69,14 @@ model ChatbotSettings {
   handoffAfterMisses Int      @default(2)
   handoffKeywords    String   @default("[\"human\",\"agent\",\"person\",\"manager\"]")
   voiceEnabled       Boolean  @default(true)
+  // Hands-free voice assistant and the spoken welcome. Optional: older documents don't have them.
+  voiceAssistantEnabled Boolean?
+  welcomeVoiceEnabled   Boolean?
+  // {"en":"Hi! ...","bn":"..."}; empty uses the built-in greeting.
+  welcomeVoiceText      String?
+  salesPlaybookEnabled  Boolean?
+  // Complementary categories for cross-selling, e.g. {"Backpacks":["Water bottles","Rain covers"]}
+  recommendationMap     String?
   attachmentsEnabled Boolean  @default(true)
   enabledFeatures    String   @default("[\"product_cards\",\"cart_tools\",\"knowledge_search\",\"orders\"]")
   widgetTheme        String   @default("{}")
@@ -325,6 +335,9 @@ model CheckoutSession {
   currency         String
   // Details collected in chat; the checkout page pre-fills them.
   customer         CustomerDetails?
+  // Set when the assistant showed an order confirmation card (voice/chat ordering, cash on delivery).
+  shippingZoneId   String?
+  proposedAt       DateTime?
   orderId          String?          @db.ObjectId
   createdAt        DateTime         @default(now())
   expiresAt        DateTime?
@@ -384,4 +397,77 @@ model Order {
 
   @@index([storeId, status, createdAt])
   @@index([storeId, createdAt])
+}
+
+/// Marketing permission. Stored only when the customer explicitly agreed, with the question asked.
+type MarketingConsent {
+  granted  Boolean
+  // sms | whatsapp | email
+  channels String[]
+  at       DateTime
+  // voice | chat | checkout
+  source   String
+  wording  String
+  // What the customer said when agreeing (audit trail).
+  evidence String   @default("")
+}
+
+/// Everything the store knows about a shopper, for follow-up marketing. Linked to chat sessions by
+/// visitor id, and merged by phone number once the customer gives it.
+model CustomerProfile {
+  id               String            @id @default(auto()) @map("_id") @db.ObjectId
+  storeId          String            @db.ObjectId
+  // normalizePhone(phone): last 10 digits; "" until known.
+  phoneKey         String            @default("")
+  phone            String            @default("")
+  name             String            @default("")
+  email            String            @default("")
+  // Last delivery details, offered again on the next order ("use your saved address?").
+  // Optional: profiles created before these fields don't have them.
+  address          String?
+  city             String?
+  deliveryAreaId   String?
+  preferredLocale  String            @default("")
+  interests        String[]
+  budgetHint       String            @default("")
+  visitorIds       String[]
+  marketingConsent MarketingConsent?
+  orderCount       Int               @default(0)
+  totalSpentMinor  Int               @default(0)
+  lastOrderAt      DateTime?
+  firstSeenAt      DateTime          @default(now())
+  lastSeenAt       DateTime          @default(now())
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  store  Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  events CustomerEvent[]
+
+  @@index([storeId, lastSeenAt])
+  @@index([storeId, phoneKey])
+  @@index([storeId, visitorIds])
+}
+
+/// Shopping activity for marketing and analytics.
+model CustomerEvent {
+  id         String           @id @default(auto()) @map("_id") @db.ObjectId
+  storeId    String           @db.ObjectId
+  sessionId  String           @db.ObjectId
+  visitorId  String
+  profileId  String?          @db.ObjectId
+  // viewed_product | added_to_cart | removed_from_cart | checkout_started | order_placed | abandoned_cart | voice_turn
+  type       String
+  productId  String?
+  cartId     String?
+  orderId    String?
+  valueMinor Int?
+  meta       String           @default("{}")
+  at         DateTime         @default(now())
+
+  store   Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  profile CustomerProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, type, at])
+  @@index([storeId, visitorId, at])
+  @@index([cartId, type])
 }

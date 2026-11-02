@@ -36,7 +36,7 @@ export const removeCartItemTool: ToolDefinition = {
       });
       return success(
         { message: "Item removed. Totals below are authoritative.", cart: cartCompact(updated) },
-        [{ type: "cart_summary", cart: updated }],
+        [{ type: "cart_summary", cart: updated, label: "Removed from cart" }],
       );
     } catch (error) {
       return cartErrorToResult(error);

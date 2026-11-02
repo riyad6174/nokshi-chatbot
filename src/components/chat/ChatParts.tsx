@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { formatMoney } from "@/lib/client/format";
-import type { AttachmentData, CustomerDetailsData, OrderStatusData, RefineOptions } from "@/types/chat";
+import type { AttachmentData, CustomerDetailsData, OrderConfirmationData, OrderStatusData, RefineOptions } from "@/types/chat";
 
 /** Tappable chips built from search facets ("Black", "Olive", "Trekline"...). */
 export function RefineChips({
@@ -159,6 +159,278 @@ export function OrderStatusCard({ order, accent }: { order: OrderStatusData; acc
       {order.history.length > 0 && order.history[order.history.length - 1]!.note ? (
         <p className="mt-1 text-[11px] text-stone-500">“{order.history[order.history.length - 1]!.note}”</p>
       ) : null}
+    </div>
+  );
+}
+
+type DetailDraft = { name: string; phone: string; address: string; city: string };
+
+/** One message with the exact details, so the assistant never has to re-hear them. */
+function detailsMessage(intro: string, draft: DetailDraft, area?: string): string {
+  return [
+    `${intro}:`,
+    `Name: ${draft.name.trim()}`,
+    `Phone: ${draft.phone.trim()}`,
+    `Address: ${draft.address.trim()}`,
+    draft.city.trim() ? `City: ${draft.city.trim()}` : "",
+    area ? `Delivery area: ${area}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function DetailFields({ value, onChange }: { value: DetailDraft; onChange: (next: DetailDraft) => void }) {
+  const set = (key: keyof DetailDraft) => (event: { target: { value: string } }) => onChange({ ...value, [key]: event.target.value });
+  return (
+    <>
+      <input aria-label="Full name" placeholder="Full name" value={value.name} onChange={set("name")} required minLength={2} className={fieldClass} />
+      <input
+        aria-label="Phone number"
+        placeholder="Phone, e.g. 01712345678"
+        value={value.phone}
+        onChange={set("phone")}
+        required
+        type="tel"
+        inputMode="tel"
+        pattern="[+0-9০-৯\s\-]{8,20}"
+        className={`${fieldClass} font-mono tracking-wide`}
+      />
+      <input aria-label="Delivery address" placeholder="House, road, area" value={value.address} onChange={set("address")} required minLength={5} className={fieldClass} />
+      <input aria-label="City" placeholder="City" value={value.city} onChange={set("city")} className={fieldClass} />
+    </>
+  );
+}
+
+/** The assistant wasn't sure what it heard: the customer types or fixes their details here. */
+export function ContactForm({
+  prefill,
+  deliveryAreas,
+  deliveryAreaId,
+  note,
+  accent,
+  active,
+  onSubmit,
+}: {
+  prefill: Partial<CustomerDetailsData>;
+  deliveryAreas: Array<{ id: string; label: string }>;
+  deliveryAreaId: string;
+  note: string;
+  accent: string;
+  active: boolean;
+  onSubmit: (message: string) => void;
+}) {
+  const [draft, setDraft] = useState<DetailDraft>({
+    name: prefill.name ?? "",
+    phone: prefill.phone ?? "",
+    address: prefill.address ?? "",
+    city: prefill.city ?? "",
+  });
+  const [area, setArea] = useState(deliveryAreaId || deliveryAreas[0]?.id || "");
+  const [sent, setSent] = useState(false);
+  if (!active || sent) {
+    return <p className="text-[11.5px] text-stone-500">{sent ? "Details sent ✓" : "Form closed."}</p>;
+  }
+  return (
+    <form
+      className="space-y-1.5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const label = deliveryAreas.find((entry) => entry.id === area);
+        setSent(true);
+        onSubmit(detailsMessage("My delivery details", draft, label ? `${label.label} (id: ${label.id})` : undefined));
+      }}
+    >
+      {note ? <p className="text-[11.5px] font-medium text-amber-700">{note}</p> : null}
+      <DetailFields value={draft} onChange={setDraft} />
+      {deliveryAreas.length > 0 ? (
+        <select aria-label="Delivery area" value={area} onChange={(event) => setArea(event.target.value)} className={fieldClass}>
+          {deliveryAreas.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {entry.label}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      <button type="submit" className="w-full rounded-lg py-2 text-[12.5px] font-semibold text-white transition hover:brightness-110" style={{ backgroundColor: accent }}>
+        Send details
+      </button>
+    </form>
+  );
+}
+
+/** Shown when an order has just been placed from the chat. */
+export function OrderSuccessCard({ order, accent }: { order: OrderStatusData; accent: string }) {
+  return (
+    <div className="animate-pop overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm">
+      <div className="bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 px-3.5 py-3 text-white">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/25" aria-hidden="true">
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12.5l4.5 4.5L19 7.5" />
+            </svg>
+          </span>
+          <div>
+            <p className="text-[14px] font-bold leading-tight">Order placed!</p>
+            <p className="text-[11.5px] text-white/90">Thank you. We&apos;ll call you to confirm delivery.</p>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2 px-3.5 py-2.5 text-[11px]">
+        <div>
+          <p className="text-stone-400">Order no.</p>
+          <p className="font-mono text-[12.5px] font-bold text-stone-900">{order.orderNumber}</p>
+        </div>
+        <div>
+          <p className="text-stone-400">Total</p>
+          <p className="text-[12.5px] font-bold text-stone-900">{formatMoney(order.totalMinor, order.currency)}</p>
+        </div>
+        <div>
+          <p className="text-stone-400">Payment</p>
+          <p className="text-[12.5px] font-semibold text-stone-900">{order.paymentMethod === "cod" ? "On delivery" : "Online"}</p>
+        </div>
+      </div>
+      <ul className="border-t border-stone-100 px-3.5 py-2 text-[11.5px] text-stone-600">
+        {order.items.map((item, index) => (
+          <li key={index} className="flex justify-between gap-2">
+            <span className="truncate">
+              {item.quantity} × {item.name}
+              {item.variantTitle ? ` (${item.variantTitle})` : ""}
+            </span>
+            <span className="shrink-0">{formatMoney(item.lineTotalMinor, order.currency)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="border-t border-stone-100 px-3.5 py-2 text-[10.5px]" style={{ color: accent }}>
+        Ask me “where is my order?” any time to track it.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The order summary to confirm before a cash-on-delivery order is placed from the chat. The customer
+ * confirms by tapping, or by saying so (the assistant then places it).
+ */
+export function OrderConfirmationCard({
+  confirmation,
+  accent,
+  state,
+  busy,
+  onConfirm,
+  onEdit,
+}: {
+  confirmation: OrderConfirmationData;
+  accent: string;
+  /** open: can be confirmed · placed: an order followed · stale: replaced by a newer summary */
+  state: "open" | "placed" | "stale";
+  busy: boolean;
+  onConfirm: () => void;
+  /** The customer corrected their details: sent back to the assistant as their message. */
+  onEdit: (message: string) => void;
+}) {
+  const { customer } = confirmation;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ name: customer.name, phone: customer.phone, address: customer.address, city: customer.city });
+  const saveEdits = () => {
+    setEditing(false);
+    onEdit(detailsMessage("Please update my order details", draft));
+  };
+  return (
+    <div className="animate-fade-up overflow-hidden rounded-xl border bg-white text-[12px]" style={{ borderColor: `${accent}55` }}>
+      <div className="flex items-center justify-between px-3 py-2 text-white" style={{ backgroundColor: accent }}>
+        <p className="text-[12.5px] font-semibold">Confirm your order</p>
+        <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10.5px] font-semibold">Cash on delivery</span>
+      </div>
+      <div className="space-y-2 p-3">
+        <ul className="space-y-0.5 text-stone-700">
+          {confirmation.lines.map((line, index) => (
+            <li key={index} className="flex justify-between gap-2">
+              <span className="truncate">
+                {line.quantity} × {line.name}
+                {line.variantTitle ? ` (${line.variantTitle})` : ""}
+              </span>
+              <span className="shrink-0">{formatMoney(line.lineTotalMinor, confirmation.currency)}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="space-y-0.5 border-t border-stone-100 pt-1.5 text-stone-600">
+          <div className="flex justify-between">
+            <span>Subtotal</span>
+            <span>{formatMoney(confirmation.subtotalMinor, confirmation.currency)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Delivery{confirmation.deliveryArea ? ` · ${confirmation.deliveryArea}` : ""}</span>
+            <span>{confirmation.shippingMinor === 0 ? "Free" : formatMoney(confirmation.shippingMinor, confirmation.currency)}</span>
+          </div>
+          <div className="flex justify-between text-[13px] font-semibold text-stone-900">
+            <span>Total to pay on delivery</span>
+            <span>{formatMoney(confirmation.totalMinor, confirmation.currency)}</span>
+          </div>
+        </div>
+        {editing ? (
+          <form
+            className="space-y-1.5 rounded-lg bg-stone-50 p-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveEdits();
+            }}
+          >
+            <DetailFields value={draft} onChange={setDraft} />
+            <div className="flex gap-2 pt-0.5">
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="flex-1 rounded-lg border border-stone-200 bg-white py-1.5 text-[11.5px] font-medium text-stone-600"
+              >
+                Cancel
+              </button>
+              <button type="submit" className="flex-[1.4] rounded-lg py-1.5 text-[11.5px] font-semibold text-white" style={{ backgroundColor: accent }}>
+                Save changes
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="relative rounded-lg bg-stone-50 px-2.5 py-2 text-[11.5px] leading-snug text-stone-700">
+            <p className="font-semibold text-stone-900">{customer.name}</p>
+            <p className="font-mono tracking-wide">{customer.phone}</p>
+            <p>
+              {customer.address}
+              {customer.city ? `, ${customer.city}` : ""}
+            </p>
+            {customer.notes ? <p className="text-stone-500">“{customer.notes}”</p> : null}
+            {state === "open" ? (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="absolute right-1.5 top-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold underline-offset-2 hover:underline"
+                style={{ color: accent }}
+              >
+                Edit details
+              </button>
+            ) : null}
+          </div>
+        )}
+        {state === "open" && !editing ? (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={busy}
+              className="w-full rounded-lg py-2.5 text-[13px] font-semibold text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
+              style={{ backgroundColor: accent }}
+            >
+              {busy ? "Placing order…" : "Confirm order"}
+            </button>
+          </div>
+        ) : state !== "open" ? (
+          <p className="text-center text-[11px] text-stone-500">
+            {state === "placed" ? "This order was placed." : "This summary was replaced by a newer one."}
+          </p>
+        ) : null}
+        {state === "open" && !editing ? (
+          <p className="text-center text-[10.5px] text-stone-400">Or just say “confirm”. Nothing is charged now.</p>
+        ) : null}
+      </div>
     </div>
   );
 }

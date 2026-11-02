@@ -2,7 +2,9 @@ import Link from "next/link";
 import { AdminBanner } from "@/components/dashboard/AdminBanner";
 import { PersonalityForm } from "@/components/dashboard/PersonalityForm";
 import { ProductSourceForm } from "@/components/dashboard/ProductSourceForm";
-import { saveChatFeaturesAction, saveHandoffAction, syncNowAction } from "@/app/admin/chatbot-actions";
+import { saveChatFeaturesAction, saveHandoffAction, saveVoiceSalesAction, syncNowAction } from "@/app/admin/chatbot-actions";
+import { env } from "@/lib/config/env";
+import { speechMode } from "@/modules/speech/config";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db/prisma";
 import { CONVERSATION_STYLES, TONES } from "@/modules/ai/system-instructions";
@@ -16,6 +18,7 @@ const TABS = [
   { id: "personality", label: "Personality & greetings" },
   { id: "handoff", label: "Human handoff" },
   { id: "features", label: "Chat box" },
+  { id: "voice", label: "Voice & sales" },
 ] as const;
 
 const inputClass =
@@ -54,6 +57,11 @@ export default async function ConfigureChatbotPage({
   ]);
   const counts = parseJsonObject(source.lastCounts) as Record<string, number>;
   const theme = parseJsonObject(settings?.widgetTheme);
+  const welcomeVoice = parseJsonObject(settings?.welcomeVoiceText);
+  const recommendationLines = Object.entries(parseJsonObject(settings?.recommendationMap))
+    .filter((entry): entry is [string, string[]] => Array.isArray(entry[1]))
+    .map(([category, targets]) => `${category}: ${targets.join(", ")}`)
+    .join("\n");
   let topics: Array<{ label: string; prompt: string }> = [];
   try {
     topics = JSON.parse(settings?.suggestedTopics || "[]");
@@ -277,6 +285,109 @@ export default async function ConfigureChatbotPage({
             <div className="sm:col-span-2">
               <button type="submit" className="rounded-lg bg-stone-900 px-3.5 py-2 text-[11.5px] font-semibold text-white hover:bg-stone-800">
                 Save chat box
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+      {tab === "voice" ? (
+        <section className="mt-5 rounded-xl border border-stone-200 bg-white p-5">
+          <h2 className="text-[13px] font-semibold text-stone-900">Voice assistant & selling</h2>
+          <p className="mt-1 text-[11.5px] text-stone-500">
+            Speech:{" "}
+            {speechMode() === "server" ? (
+              <span className="font-medium text-emerald-700">{env.SPEECH_PROVIDER} (cloud voices, works in every modern browser)</span>
+            ) : (
+              <span className="font-medium text-amber-700">
+                browser (free; listening works in Chrome and Edge, voices depend on the device). Set SPEECH_PROVIDER and
+                SPEECH_API_KEY for natural English and Bangla voices.
+              </span>
+            )}
+          </p>
+          <form action={saveVoiceSalesAction} className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="flex items-start gap-2 text-[12px] text-stone-800">
+              <input
+                type="checkbox"
+                name="voiceAssistantEnabled"
+                defaultChecked={settings?.voiceAssistantEnabled ?? true}
+                className="mt-0.5"
+              />
+              <span>
+                Hands-free voice assistant
+                <span className="block text-[10.5px] text-stone-500">
+                  A Talk button in the chat: customers speak naturally and the assistant answers out loud, showing products and
+                  orders on screen. Needs Voice messages turned on in Chat box.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-[12px] text-stone-800">
+              <input type="checkbox" name="welcomeVoiceEnabled" defaultChecked={settings?.welcomeVoiceEnabled ?? true} className="mt-0.5" />
+              <span>
+                Spoken welcome
+                <span className="block text-[10.5px] text-stone-500">
+                  Greets new visitors a few seconds after they land (once a week at most) and offers the voice assistant. Browsers
+                  play sound only after the visitor first clicks or taps the page.
+                </span>
+              </span>
+            </label>
+            <div>
+              <label htmlFor="welcomeEn" className={labelClass}>
+                Welcome line (English)
+              </label>
+              <textarea
+                id="welcomeEn"
+                name="welcomeEn"
+                rows={3}
+                defaultValue={typeof welcomeVoice.en === "string" ? welcomeVoice.en : ""}
+                placeholder="Hello, I'm your voice assistant. Let me know how I can help you."
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label htmlFor="welcomeBn" className={labelClass}>
+                Welcome line (Bangla)
+              </label>
+              <textarea
+                id="welcomeBn"
+                name="welcomeBn"
+                rows={3}
+                defaultValue={typeof welcomeVoice.bn === "string" ? welcomeVoice.bn : ""}
+                placeholder="হ্যালো, আমি আপনার voice assistant। আপনাকে কিভাবে সাহায্য করতে পারি আমাকে জানান।"
+                className={inputClass}
+              />
+            </div>
+            <p className="-mt-2 text-[10.5px] text-stone-500 sm:col-span-2">
+              Leave empty for the built-in greeting. {"{store}"} and {"{assistant}"} are replaced with your store and assistant names.
+            </p>
+            <label className="flex items-start gap-2 text-[12px] text-stone-800 sm:col-span-2">
+              <input type="checkbox" name="salesPlaybookEnabled" defaultChecked={settings?.salesPlaybookEnabled ?? true} className="mt-0.5" />
+              <span>
+                Sales playbook
+                <span className="block text-[10.5px] text-stone-500">
+                  The assistant asks about needs, recommends 1-3 products, handles price objections with cheaper options, suggests
+                  one add-on after an item is added, and asks for the order. It never invents discounts or scarcity.
+                </span>
+              </span>
+            </label>
+            <div className="sm:col-span-2">
+              <label htmlFor="recommendationMap" className={labelClass}>
+                Add-on suggestions (one per line: category: categories that go with it)
+              </label>
+              <textarea
+                id="recommendationMap"
+                name="recommendationMap"
+                rows={4}
+                defaultValue={recommendationLines}
+                placeholder={"Bags: Accessories\nClothing: Accessories, Bags"}
+                className={`${inputClass} font-mono`}
+              />
+              <p className="mt-1 text-[10.5px] text-stone-500">
+                Empty: the assistant suggests a lower-priced item from another category.
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <button type="submit" className="rounded-lg bg-stone-900 px-3.5 py-2 text-[11.5px] font-semibold text-white hover:bg-stone-800">
+                Save voice & sales
               </button>
             </div>
           </form>

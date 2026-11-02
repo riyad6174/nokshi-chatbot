@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { spokenPhone } from "@/lib/digits";
 
 export const widgetSessionRequestSchema = z.object({
   widgetKey: z.string().min(1).max(200),
@@ -30,6 +31,17 @@ export const widgetMessageRequestSchema = z
     path: ["message"],
   });
 
+/** Multipart fields of POST /api/widget/voice/turn (the audio itself is a separate file field). */
+export const widgetVoiceTurnSchema = z.object({
+  conversationId: z.string().min(1).max(100),
+  lang: z.enum(["en", "bn"]).default("en"),
+  // Browser speech recognition result, used when the server has no speech provider.
+  transcript: z.string().trim().max(2000).default(""),
+  durationMs: z.coerce.number().int().min(0).max(120_000).optional(),
+  // What the assistant was saying when the customer spoke over it (echo check only).
+  assistantSaid: z.string().max(1000).default(""),
+});
+
 export const addCartItemSchema = z.object({
   productId: z.string().min(1).max(100),
   variantId: z.string().min(1).max(100).nullish(),
@@ -47,12 +59,16 @@ export const removeCartItemSchema = z.object({
 
 export const customerDetailsSchema = z.object({
   name: z.string().trim().min(2, "Enter your full name").max(100),
-  // Loose on purpose: local and international formats. At least 8 digits.
-  phone: z
-    .string()
-    .trim()
-    .max(25)
-    .refine((value) => value.replace(/\D/g, "").length >= 8, "Enter a valid phone number"),
+  // Loose on purpose: local and international formats. At least 8 digits. Bangla digits and spoken
+  // digits ("জিরো ওয়ান ...") are converted.
+  phone: z.preprocess(
+    (value) => (typeof value === "string" ? spokenPhone(value) : value),
+    z
+      .string()
+      .trim()
+      .max(25)
+      .refine((value) => value.replace(/\D/g, "").length >= 8, "Enter a valid phone number"),
+  ),
   email: z.string().trim().max(200).email("Enter a valid email").or(z.literal("")).default(""),
   address: z.string().trim().min(5, "Enter a delivery address").max(400),
   city: z.string().trim().max(100).default(""),

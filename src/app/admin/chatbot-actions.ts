@@ -219,3 +219,52 @@ export async function saveChatFeaturesAction(formData: FormData) {
   revalidatePath("/");
   done("features");
 }
+
+const voiceSalesSchema = z.object({
+  voiceAssistantEnabled: z.boolean(),
+  welcomeVoiceEnabled: z.boolean(),
+  welcomeEn: z.string().trim().max(400),
+  welcomeBn: z.string().trim().max(400),
+  salesPlaybookEnabled: z.boolean(),
+  recommendationMap: z.string().max(4000),
+});
+
+/** "Backpacks: Water bottles, Rain covers" per line → {"Backpacks":["Water bottles","Rain covers"]} */
+function parseRecommendationLines(text: string): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const line of text.split(/\r?\n/)) {
+    const [category, targets] = line.split(":");
+    if (!category?.trim() || !targets) continue;
+    const list = targets.split(",").map((target) => target.trim()).filter(Boolean).slice(0, 10);
+    if (list.length > 0) map[category.trim().slice(0, 80)] = list;
+  }
+  return map;
+}
+
+export async function saveVoiceSalesAction(formData: FormData) {
+  const store = await adminStore();
+  const parsed = voiceSalesSchema.safeParse({
+    voiceAssistantEnabled: formData.get("voiceAssistantEnabled") === "on",
+    welcomeVoiceEnabled: formData.get("welcomeVoiceEnabled") === "on",
+    welcomeEn: formData.get("welcomeEn") ?? "",
+    welcomeBn: formData.get("welcomeBn") ?? "",
+    salesPlaybookEnabled: formData.get("salesPlaybookEnabled") === "on",
+    recommendationMap: formData.get("recommendationMap") ?? "",
+  });
+  if (!parsed.success) done("voice", parsed.error.issues[0]?.message ?? "Check the fields.");
+  const welcome: Record<string, string> = {};
+  if (parsed.data.welcomeEn) welcome.en = parsed.data.welcomeEn;
+  if (parsed.data.welcomeBn) welcome.bn = parsed.data.welcomeBn;
+  await prisma.chatbotSettings.update({
+    where: { storeId: store.id },
+    data: {
+      voiceAssistantEnabled: parsed.data.voiceAssistantEnabled,
+      welcomeVoiceEnabled: parsed.data.welcomeVoiceEnabled,
+      welcomeVoiceText: JSON.stringify(welcome),
+      salesPlaybookEnabled: parsed.data.salesPlaybookEnabled,
+      recommendationMap: JSON.stringify(parseRecommendationLines(parsed.data.recommendationMap)),
+    },
+  });
+  revalidatePath("/");
+  done("voice");
+}

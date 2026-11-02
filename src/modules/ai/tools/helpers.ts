@@ -1,13 +1,14 @@
+import { priceLabel } from "@/lib/money";
 import { CartError, getActiveCart, getCartSummary } from "@/modules/cart/cart.service";
 import type { CartPayload, ChatPart, ProductCardData } from "@/types/chat";
 import type { ToolContext, ToolExecutionResult } from "@/modules/ai/tools/types";
 
+// Prices reach the model as ready-to-say labels ("2,550 taka"), never raw minor units.
 export function cartCompact(cart: CartPayload) {
   return {
     cartId: cart.cartId,
-    currency: cart.currency,
     itemCount: cart.itemCount,
-    subtotalMinor: cart.subtotalMinor,
+    subtotal: priceLabel(cart.subtotalMinor, cart.currency),
     items: cart.items.map((item) => ({
       itemId: item.itemId,
       productId: item.productId,
@@ -15,8 +16,8 @@ export function cartCompact(cart: CartPayload) {
       name: item.name,
       variantTitle: item.variantTitle,
       quantity: item.quantity,
-      unitPriceMinor: item.unitPriceMinor,
-      lineTotalMinor: item.lineTotalMinor,
+      unitPrice: priceLabel(item.unitPriceMinor, cart.currency),
+      lineTotal: priceLabel(item.lineTotalMinor, cart.currency),
       available: item.available,
     })),
   };
@@ -30,15 +31,14 @@ export function productCompact(product: ProductCardData) {
     brand: product.brand || undefined,
     attributes: product.attributes,
     description: product.description.slice(0, 400),
-    priceMinor: product.priceMinor,
-    currency: product.currency,
+    price: priceLabel(product.priceMinor, product.currency),
     available: product.available,
     variants: product.variants.map((variant) => ({
       id: variant.id,
       title: variant.title,
       sku: variant.sku,
       options: variant.options,
-      priceMinor: variant.priceMinor,
+      price: priceLabel(variant.priceMinor, product.currency),
       available: variant.available,
     })),
   };

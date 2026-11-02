@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { AdminBanner } from "@/components/dashboard/AdminBanner";
 import { prisma } from "@/lib/db/prisma";
+import { formatMinor } from "@/lib/money";
 import { resolveAiStatus } from "@/modules/ai/config";
+import { salesStats } from "@/modules/customers/events.service";
 import { allowedCheckoutHosts } from "@/modules/commerce/checkout-url";
 import { getPrimaryStore, parseJsonArray, parseJsonObject } from "@/modules/stores/store.service";
 
@@ -24,7 +26,7 @@ export default async function AdminOverviewPage({
     );
   }
 
-  const [productCount, activeCount, knowledgeCount, conversationCount, preparedCheckouts, recent] =
+  const [productCount, activeCount, knowledgeCount, conversationCount, preparedCheckouts, recent, sales] =
     await Promise.all([
       prisma.product.count({ where: { storeId: store.id } }),
       prisma.product.count({ where: { storeId: store.id, status: "active" } }),
@@ -41,6 +43,7 @@ export default async function AdminOverviewPage({
           messages: { orderBy: { createdAt: "desc" }, take: 1, select: { content: true } },
         },
       }),
+      salesStats(store.id, 30),
     ]);
 
   const theme = parseJsonObject(store.settings?.widgetTheme);
@@ -76,6 +79,40 @@ export default async function AdminOverviewPage({
             <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-stone-400">{stat.label}</p>
             <p className="mt-1.5 text-2xl font-semibold text-stone-900">{stat.value}</p>
             <p className="mt-0.5 text-[10.5px] text-stone-400">{stat.detail}</p>
+          </div>
+        ))}
+      </div>
+
+      <h2 className="mt-6 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">Sales · last 30 days</h2>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          {
+            label: "Orders",
+            value: sales.orders,
+            detail: `${formatMinor(sales.revenueMinor, store.currency)} revenue`,
+          },
+          {
+            label: "Voice conversations",
+            value: sales.voiceSessions,
+            detail: `${sales.voiceOrders} orders · ${
+              sales.voiceSessions ? Math.round((sales.voiceOrders / sales.voiceSessions) * 100) : 0
+            }% converted`,
+          },
+          { label: "Abandoned carts", value: sales.abandoned, detail: "idle 2h+ without ordering" },
+          { label: "Marketing opt-ins", value: sales.optIns, detail: "new consents", href: "/admin/customers?filter=opted_in" },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-xl border border-stone-200 bg-white p-4">
+            <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-stone-400">{stat.label}</p>
+            <p className="mt-1.5 text-2xl font-semibold text-stone-900">{stat.value}</p>
+            <p className="mt-0.5 text-[10.5px] text-stone-400">
+              {stat.href ? (
+                <Link href={stat.href} className="underline-offset-2 hover:underline">
+                  {stat.detail}
+                </Link>
+              ) : (
+                stat.detail
+              )}
+            </p>
           </div>
         ))}
       </div>

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db/prisma";
 import { isObjectId } from "@/lib/db/ids";
 import { formatMinor } from "@/lib/money";
 import { getProductById } from "@/modules/catalog/product.service";
+import { trackEvent } from "@/modules/customers/events.service";
 import { appendMessage } from "@/modules/conversations/conversation.service";
 import type { SessionContext } from "@/modules/conversations/session.service";
 import { parseJsonObject } from "@/modules/stores/store.service";
@@ -47,9 +48,17 @@ export async function ensureProductGreeting(context: SessionContext, productId: 
     parts: [
       { type: "text", text: greeting },
       { type: "text", text: overview },
-      { type: "product_list", products: [product] },
+      { type: "product_list", products: [product], label: "You're looking at" },
     ],
   });
   await prisma.conversation.update({ where: { id: context.conversationId }, data: { contextProductId: productId } });
+  await trackEvent({
+    storeId: context.storeId,
+    sessionId: context.sessionId,
+    visitorId: context.visitorId,
+    type: "viewed_product",
+    productId,
+    meta: { source: "product_page" },
+  });
   return true;
 }

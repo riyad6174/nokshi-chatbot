@@ -15,6 +15,6 @@ export const getCartTool: ToolDefinition = {
   schema,
   async execute(ctx) {
     const cart = await getCartForTool(ctx);
-    return success({ cart: cartCompact(cart) }, [{ type: "cart_summary", cart }]);
+    return success({ cart: cartCompact(cart) }, [{ type: "cart_summary", cart, label: "Your cart" }]);
   },
 };

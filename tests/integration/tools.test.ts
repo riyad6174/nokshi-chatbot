@@ -33,6 +33,11 @@ describe("tool executor", () => {
         "save_customer_details",
         "get_order_status",
         "request_human",
+        "propose_order",
+        "confirm_order",
+        "get_recommendations",
+        "save_customer_profile",
+        "collect_contact_details",
       ].sort(),
     );
   });

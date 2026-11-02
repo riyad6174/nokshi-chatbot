@@ -2,9 +2,12 @@ import { randomInt } from "node:crypto";
 import type { CustomerDetails, Order, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { isObjectId } from "@/lib/db/ids";
+import { phoneDigits } from "@/lib/digits";
 import { logger } from "@/lib/logging/logger";
 import type { CheckoutLineSnapshot } from "@/modules/commerce/commerce-adapter";
 import { variantPriceMinor } from "@/modules/catalog/product.service";
+import { trackEvent } from "@/modules/customers/events.service";
+import { recordOrderOnProfile } from "@/modules/customers/profile.service";
 import type { OrderStatusData } from "@/types/chat";
 
 // Interactive transactions default to a 5 s limit, which a slow Atlas round-trip can exceed.
@@ -82,7 +85,7 @@ export function shippingFor(
 
 /** Digits only; compares the last 10 so "+880 1712-345678" matches "01712345678". */
 export function normalizePhone(phone: string): string {
-  return phone.replace(/\D/g, "").slice(-10);
+  return phoneDigits(phone).slice(-10);
 }
 
 const ORDER_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -231,6 +234,17 @@ export async function placeOrderFromCheckout(input: PlaceOrderInput): Promise<Or
 
       logger.info("order.placed", { storeId: store.id, orderId: order.id, totalMinor: order.totalMinor, lines: lines.length });
       await announceInChat(order);
+      await recordOrderOnProfile(order);
+      if (order.sessionId) {
+        await trackEvent({
+          storeId: store.id,
+          sessionId: order.sessionId,
+          type: "order_placed",
+          orderId: order.id,
+          cartId: checkout.cartId,
+          valueMinor: order.totalMinor,
+        });
+      }
       return order;
     } catch (error) {
       // Order-number collision: retry with a new number. Everything else propagates.

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getProductById } from "@/modules/catalog/product.service";
+import { trackEvent } from "@/modules/customers/events.service";
 import { failure, productCompact, success } from "@/modules/ai/tools/helpers";
 import type { ToolDefinition } from "@/modules/ai/tools/types";
 
@@ -26,6 +27,14 @@ export const getProductDetailsTool: ToolDefinition = {
     if (!product) {
       return failure("product_not_found", "That product is not available in this store.");
     }
-    return success({ product: productCompact(product) }, [{ type: "product_list", products: [product] }]);
+    await trackEvent({
+      storeId: ctx.session.storeId,
+      sessionId: ctx.session.sessionId,
+      visitorId: ctx.session.visitorId,
+      type: "viewed_product",
+      productId: product.id,
+      meta: { source: "chat" },
+    });
+    return success({ product: productCompact(product) }, [{ type: "product_list", products: [product], label: "Product details" }]);
   },
 };
