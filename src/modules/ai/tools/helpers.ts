@@ -62,9 +62,16 @@ export async function requireActiveCart(ctx: ToolContext) {
   return cart;
 }
 
+// Lookup errors mean a wrong id, not a sold-out product: say so, so the assistant retries instead
+// of telling the customer it's out of stock.
+const LOOKUP_ERRORS = new Set(["product_not_found", "variant_not_found"]);
+
 export function cartErrorToResult(error: unknown): ToolExecutionResult {
   if (error instanceof CartError) {
-    return failure(error.code, error.message, error.details);
+    const message = LOOKUP_ERRORS.has(error.code)
+      ? `${error.message} This is a wrong id, NOT a stock problem: never tell the customer it's out of stock. Retry with the product name and version name as shown (product, variant).`
+      : error.message;
+    return failure(error.code, message, error.details);
   }
   throw error;
 }

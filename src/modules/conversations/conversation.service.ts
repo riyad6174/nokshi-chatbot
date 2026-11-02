@@ -115,6 +115,36 @@ function describeAttachments(attachments: MessageAttachment[], content: string):
     .join(" ");
 }
 
+/**
+ * What a reply showed on screen, for the model's memory. Without it, the next turn knows a product
+ * was shown but not its id, guesses one, and the cart rejects it ("product not found").
+ */
+function describeShownParts(structuredContent: string | null): string {
+  if (!structuredContent) return "";
+  let parts: ChatPart[];
+  try {
+    parts = JSON.parse(structuredContent) as ChatPart[];
+  } catch {
+    return "";
+  }
+  const lines: string[] = [];
+  for (const part of parts) {
+    if (part.type === "product_list") {
+      for (const product of part.products.slice(0, 6)) {
+        const versions = product.variants
+          .map((variant) => `${variant.title} (variantId=${variant.id}, ${variant.available ? "in stock" : "sold out"})`)
+          .join("; ");
+        lines.push(`- ${product.name} productId=${product.id}${versions ? `: ${versions}` : product.available ? " (in stock)" : " (sold out)"}`);
+      }
+    } else if (part.type === "cart_summary") {
+      lines.push(`- Cart: ${part.cart.items.map((item) => `${item.quantity}x ${item.name}${item.variantTitle ? ` (${item.variantTitle})` : ""}`).join(", ") || "empty"}`);
+    } else if (part.type === "order_confirmation") {
+      lines.push("- Order summary card (waiting for the customer's confirmation)");
+    }
+  }
+  return lines.length > 0 ? `[On screen with this reply:\n${lines.join("\n")}]` : "";
+}
+
 /** Text-only history for the model. Staff replies are included so the AI knows what a human already said. */
 export async function getProviderHistory(conversationId: string, limit = 20) {
   const rows = await prisma.message.findMany({
@@ -130,7 +160,8 @@ export async function getProviderHistory(conversationId: string, limit = 20) {
         return { role: "user" as const, content: [row.content, extra].filter(Boolean).join("\n") };
       }
       const prefix = row.role === "agent" ? `[Reply from store staff${row.senderName ? ` ${row.senderName}` : ""}] ` : "";
-      return { role: "assistant" as const, content: `${prefix}${row.content}` };
+      const shown = row.role === "assistant" ? describeShownParts(row.structuredContent) : "";
+      return { role: "assistant" as const, content: [`${prefix}${row.content}`, shown].filter(Boolean).join("\n") };
     })
     .filter((row) => row.content.trim().length > 0);
 }

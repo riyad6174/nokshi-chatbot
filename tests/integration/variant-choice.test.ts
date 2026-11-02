@@ -53,3 +53,18 @@ describe("adding a product whose other version is sold out", () => {
     expect(content.error?.code).toBe("variant_required");
   });
 });
+
+describe("the assistant remembers what it showed", () => {
+  it("keeps product and version ids from earlier replies in its history", async () => {
+    const { appendMessage, getProviderHistory } = await import("@/modules/conversations/conversation.service");
+    const session = await newSession();
+    const shown = await executeTool({ session }, "search_products", JSON.stringify({ query: "watch" }));
+    await appendMessage({ conversationId: session.conversationId, role: "assistant", content: "Here's a watch.", parts: [{ type: "text", text: "Here's a watch." }, ...(shown.ui ?? [])] });
+
+    const history = await getProviderHistory(session.conversationId);
+    const memory = history.find((entry) => entry.role === "assistant")!.content;
+    expect(memory).toContain(`productId=${watch.id}`);
+    expect(memory).toContain(`Silver / Tan leather (variantId=${watch.silver}, in stock)`);
+    expect(memory).toContain(`Black / Black leather (variantId=${watch.black}, sold out)`);
+  });
+});
