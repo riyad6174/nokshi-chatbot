@@ -18,6 +18,8 @@ type ProductCardProps = {
   layout?: "row" | "tile";
   /** Tile width in a slider, e.g. "w-[172px]"; without it a tile fills its container. */
   tileWidth?: string;
+  /** Grid tile: shorter image, add button beside the price, so several rows fit on screen. */
+  dense?: boolean;
   onAdd: (productId: string, variantId: string | null) => void;
 };
 
@@ -130,7 +132,7 @@ function AddButton({
   );
 }
 
-export function ProductCard({ product, accent, busy, index = 0, layout = "row", tileWidth, onAdd }: ProductCardProps) {
+export function ProductCard({ product, accent, busy, index = 0, layout = "row", tileWidth, dense = false, onAdd }: ProductCardProps) {
   const firstAvailable = product.variants.find((variant) => variant.available) ?? product.variants[0] ?? null;
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(firstAvailable?.id ?? null);
   const selectedVariant = product.variants.find((variant) => variant.id === selectedVariantId) ?? null;
@@ -138,6 +140,54 @@ export function ProductCard({ product, accent, busy, index = 0, layout = "row", 
   const canAdd = product.available && (!selectedVariant || selectedVariant.available);
   const add = () => onAdd(product.id, selectedVariant?.id ?? null);
   const meta = [product.brand, product.category].filter(Boolean).join(" · ");
+
+  if (layout === "tile" && dense) {
+    return (
+      <article
+        data-testid="product-card"
+        className="group card-float-in flex w-full flex-col overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 transition duration-300 hover:-translate-y-1"
+        style={{ animationDelay: `${index * 55}ms` }}
+      >
+        <div className="relative">
+          <ProductImage product={product} sizes="(min-width: 1024px) 220px, (min-width: 640px) 30vw, 45vw" className="aspect-[16/11] w-full" />
+          <span className="absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-white/95 px-1.5 text-[11px] font-bold text-stone-800 ring-1 ring-black/5">
+            {index + 1}
+          </span>
+        </div>
+        <div className="flex flex-1 flex-col gap-1.5 p-2.5">
+          <div className="min-w-0">
+            {meta ? <p className="truncate text-[9.5px] font-semibold uppercase tracking-[0.12em] text-stone-400">{meta}</p> : null}
+            <p className="truncate text-[13px] font-semibold text-stone-900" title={product.name}>
+              {product.name}
+            </p>
+          </div>
+          <VariantChips variants={product.variants} selectedId={selectedVariantId} accent={accent} onSelect={setSelectedVariantId} compact />
+          <div className="mt-auto flex items-center justify-between gap-2 pt-0.5">
+            <p className="text-[15px] font-bold tracking-tight" style={{ color: accent }}>
+              {formatMoney(priceMinor, product.currency)}
+            </p>
+            <button
+              type="button"
+              onClick={add}
+              disabled={!canAdd || busy}
+              aria-label={canAdd ? `Add ${product.name} to cart` : `${product.name} is sold out`}
+              title={canAdd ? "Add to cart" : "Sold out"}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition hover:scale-105 hover:brightness-110 active:scale-90 disabled:cursor-not-allowed disabled:bg-stone-300"
+              style={canAdd ? { backgroundColor: accent } : undefined}
+            >
+              {busy ? (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />
+              ) : (
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+      </article>
+    );
+  }
 
   if (layout === "tile") {
     return (

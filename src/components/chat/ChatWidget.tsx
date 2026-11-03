@@ -8,7 +8,7 @@ import { useRealtimeVoice } from "@/components/chat/useRealtimeVoice";
 import { useVoiceRecorder } from "@/components/chat/useVoiceRecorder";
 import { AssistantOrb, type OrbState } from "@/components/chat/AssistantOrb";
 import { Confetti } from "@/components/chat/Confetti";
-import { FloatingActions, pickLatestActions } from "@/components/chat/FloatingActions";
+import { FloatingActions, hasSlot, pickLatestActions } from "@/components/chat/FloatingActions";
 import { VoiceControlCard } from "@/components/chat/VoiceControlCard";
 import { VoiceDock } from "@/components/chat/VoiceDock";
 import { CardStage } from "@/components/chat/CardStage";
@@ -729,7 +729,10 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   // Typed text (composer, chips, forms) during voice mode goes through the voice turn so the answer is spoken.
   const sendTyped = useCallback(
     (text: string) => {
-      if (voiceSession.active && text.trim() && mode === "bot") void voiceSession.submitText(text.trim());
+      // Only once the call is connected: while it's still connecting (e.g. the microphone prompt is
+      // unanswered), a typed message goes through the normal chat instead of getting lost.
+      const connected = voiceSession.active && voiceSession.phase !== "starting";
+      if (connected && text.trim() && mode === "bot") void voiceSession.submitText(text.trim());
       else void sendMessage(text);
     },
     [mode, sendMessage, voiceSession],
@@ -811,7 +814,10 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       if (session) seenCardsRef.current = cardsKey;
       return;
     }
-    if (cardsKey && cardsKey !== seenCardsRef.current) setCardsOpen(true);
+    if (cardsKey && cardsKey !== seenCardsRef.current) {
+      setCardsOpen(true);
+      void playEarcon("card");
+    }
     seenCardsRef.current = cardsKey;
   }, [cardsKey, session]);
   const cardsLabel = (() => {
@@ -1029,8 +1035,9 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const accent = session?.settings.theme.accent || "#0f766e";
   const position = session?.settings.theme.position === "left" ? "left" : "right";
 
-  const floatingActions = (
+  const floatingActions = (slot: "products" | "panel") => (
     <FloatingActions
+      slot={slot}
       messages={messages}
       cart={cart}
       accent={accent}
@@ -1066,22 +1073,13 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         }}
       />
       {voiceView ? (
-        // Soft blur over the page so the assistant has the customer's attention.
-        <div
-          className="backdrop-in fixed inset-0 z-40 bg-stone-950/25 backdrop-blur-[3px]"
-          onClick={() => {
-            if (!voiceSession.active) closePanel();
-          }}
-          aria-hidden="true"
-        />
-      ) : null}
-      {voiceView ? (
         <CardStage
           open={cardsOpen && Boolean(latestCards)}
-          wide={latestCards?.parts.some(({ part }) => part.type === "product_list" && part.products.length > 1) ?? false}
-          position={position} onClose={() => setCardsOpen(false)}>
-          {floatingActions}
-        </CardStage>
+          position={position}
+          products={hasSlot(latestCards, "products") ? floatingActions("products") : null}
+          panel={hasSlot(latestCards, "panel") ? floatingActions("panel") : null}
+          onClose={() => setCardsOpen(false)}
+        />
       ) : null}
       {voiceView ? (
         <VoiceDock

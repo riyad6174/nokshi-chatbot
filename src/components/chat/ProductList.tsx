@@ -9,24 +9,18 @@ type ProductListProps = {
   accent: string;
   busyProductId?: string | null;
   onAdd: (productId: string, variantId: string | null) => void;
-  /**
-   * Both are one swipeable row with arrows and dots. wide: the centre stage, about 3½ products in
-   * view (a peek at the next says there's more) · compact: the narrow text chat.
-   */
-  size?: "wide" | "compact";
+  /** grid: the floating product grid (up to 3 rows) · carousel: a swipeable row in the narrow text chat. */
+  display?: "grid" | "carousel";
 };
 
-const TILE_WIDTH = {
-  // ~3.5 tiles across the stage on larger screens, ~2.25 on phones.
-  wide: "w-[42%] sm:w-[27.5%]",
-  compact: "w-[172px]",
-} as const;
+/** 4 per row on wide screens, 3 rows at most. */
+const GRID_MAX = 12;
 
 /**
- * One product: a featured card. Several: numbered tiles ("the second one") in a row that swipes on
- * touch and has previous/next arrows and position dots.
+ * One product: a featured card. Several: numbered tiles ("the second one"), in a grid or in a row
+ * that swipes on touch and has previous/next arrows and position dots.
  */
-export function ProductList({ products, accent, busyProductId, onAdd, size = "compact" }: ProductListProps) {
+export function ProductList({ products, accent, busyProductId, onAdd, display = "carousel" }: ProductListProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: false });
   const [active, setActive] = useState(0);
@@ -65,6 +59,25 @@ export function ProductList({ products, accent, busyProductId, onAdd, size = "co
     return <ProductCard product={product} accent={accent} busy={busyProductId === product.id} onAdd={onAdd} />;
   }
 
+  if (display === "grid") {
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+        {products.slice(0, GRID_MAX).map((product, index) => (
+          <ProductCard
+            key={product.id}
+            index={index}
+            layout="tile"
+            dense
+            product={product}
+            accent={accent}
+            busy={busyProductId === product.id}
+            onAdd={onAdd}
+          />
+        ))}
+      </div>
+    );
+  }
+
   const arrow = (direction: -1 | 1) => (
     <button
       type="button"
@@ -96,7 +109,7 @@ export function ProductList({ products, accent, busyProductId, onAdd, size = "co
             key={product.id}
             index={index}
             layout="tile"
-            tileWidth={TILE_WIDTH[size]}
+            tileWidth="w-[172px]"
             product={product}
             accent={accent}
             busy={busyProductId === product.id}

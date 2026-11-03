@@ -33,6 +33,21 @@ const REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 type ServerEvent = { type: string; [key: string]: unknown };
 type FunctionCallItem = { type: "function_call"; call_id: string; name: string; arguments: string };
 
+/** What to tell the customer when a call can't start. Browser errors ("Not supported") are cryptic. */
+function startErrorMessage(caught: unknown): string {
+  if (caught instanceof DOMException) {
+    if (caught.name === "NotAllowedError" || caught.name === "SecurityError") {
+      return "Microphone access was blocked. Allow it in your browser to talk to the assistant.";
+    }
+    if (caught.name === "NotFoundError" || caught.name === "OverconstrainedError") {
+      return "No microphone was found. Connect one, or tap Type to chat instead.";
+    }
+    if (caught.name === "NotReadableError") return "Your microphone is busy in another app. Close it and try again.";
+    return "Voice isn't available in this browser. Tap Type to chat instead.";
+  }
+  return caught instanceof Error && caught.message ? caught.message : "Live voice couldn't start. You can keep chatting by text.";
+}
+
 type Grant = { clientSecret: string; opener: string; expiresAt: number };
 
 /** A pre-fetched call token is used only while it has at least this long left (seconds). */
@@ -412,14 +427,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
       } catch (caught) {
         teardown();
         setPhase("off");
-        const denied = caught instanceof DOMException && (caught.name === "NotAllowedError" || caught.name === "SecurityError");
-        setError(
-          denied
-            ? "Microphone access was blocked. Allow it in your browser to talk to the assistant."
-            : caught instanceof Error && caught.message
-              ? caught.message
-              : "Live voice couldn't start. You can keep chatting by text.",
-        );
+        setError(startErrorMessage(caught));
         return false;
       }
     },

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { AssistantOrb, type OrbState } from "@/components/chat/AssistantOrb";
 import type { VoiceLang, VoicePhase } from "@/components/chat/useVoiceSession";
 
@@ -127,6 +127,21 @@ export function VoiceDock({
   onOpenChat: () => void;
   onClose: () => void;
 }) {
+  // Publishes the panel's height (--voice-dock-h) so cards shown above it on small screens stop
+  // right at its top edge, whatever it currently contains.
+  const sectionRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver(() => root.style.setProperty("--voice-dock-h", `${section.offsetHeight}px`));
+    observer.observe(section);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--voice-dock-h");
+    };
+  }, []);
+
   const shownPhase: VoicePhase = active ? phase : "off";
   const orbState: OrbState = shownPhase === "off" ? "idle" : shownPhase === "starting" ? "thinking" : shownPhase;
 
@@ -138,6 +153,7 @@ export function VoiceDock({
 
   return (
     <section
+      ref={sectionRef}
       role="dialog"
       aria-label={`${assistantName}, voice assistant`}
       data-phase={shownPhase}
