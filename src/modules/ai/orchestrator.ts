@@ -2,7 +2,7 @@ import { logger } from "@/lib/logging/logger";
 import type { AiConfig } from "@/modules/ai/config";
 import type { ProviderMessage, ProviderToolCall } from "@/modules/ai/provider";
 import { streamCompletion } from "@/modules/ai/provider";
-import { buildSystemInstructions } from "@/modules/ai/system-instructions";
+import { buildSystemPromptParts } from "@/modules/ai/system-instructions";
 import { describeOpenProposal } from "@/modules/orders/voice-order.service";
 import { savedDetailsForVisitor } from "@/modules/customers/profile.service";
 import { detectLang } from "@/modules/speech/speech-provider";
@@ -20,6 +20,7 @@ export type OrchestratorEvent =
 
 export type AssistantHistoryMessage = { role: "user" | "assistant"; content: string };
 
+/** Rounds in which the model may call tools. One more round follows, if needed, to reply in text. */
 const MAX_TOOL_ITERATIONS = 5;
 
 type PartBuilder = {
@@ -93,11 +94,10 @@ export async function* runLiveAssistant(input: {
     describeOpenProposal(input.session).catch(() => null),
     savedDetailsForVisitor(input.session.storeId, input.session.visitorId).catch(() => null),
   ]);
-  const latestUser = [...input.history].reverse().find((message) => message.role === "user")?.content ?? "";
-  const system = buildSystemInstructions({
+  const system = buildSystemPromptParts({
     openOrder,
     savedDetails,
-    replyLanguage: detectLang(latestUser, input.session.locale.startsWith("bn") ? "bn" : "en"),
+    replyLanguage: detectLang(latestUserText, input.session.locale.startsWith("bn") ? "bn" : "en"),
     session: input.session,
     cart: input.cart,
     configuredInstructions: settings?.systemInstructions,
@@ -106,7 +106,8 @@ export async function* runLiveAssistant(input: {
   });
 
   const messages: ProviderMessage[] = [
-    { role: "system", content: system },
+    { role: "system", content: system.stable, cache: true },
+    { role: "system", content: system.perTurn },
     ...input.history.map((message) => ({ role: message.role, content: message.content })),
   ];
 
@@ -114,7 +115,10 @@ export async function* runLiveAssistant(input: {
   let receivedAnyText = false;
   let turnRefused = false;
 
-  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
+  for (let iteration = 0; iteration <= MAX_TOOL_ITERATIONS; iteration += 1) {
+    // Out of tool rounds: one last call with tools disabled, so the model answers from the results it
+    // already has instead of the turn ending on cards with no reply (which would count as a miss).
+    const finalRound = iteration === MAX_TOOL_ITERATIONS;
     let iterationText = "";
     let toolCalls: ProviderToolCall[] = [];
     let raw: unknown;
@@ -126,6 +130,7 @@ export async function* runLiveAssistant(input: {
       tools,
       signal: input.signal,
       temperature: 0.2,
+      toolChoice: finalRound ? "none" : "auto",
     })) {
       if (event.type === "delta") {
         iterationText += event.text;
@@ -146,6 +151,11 @@ export async function* runLiveAssistant(input: {
     }
 
     if (toolCalls.length === 0) {
+      break;
+    }
+    if (finalRound) {
+      // A provider that ignores tool_choice "none": don't run more tools.
+      logger.warn("ai.tool_limit_reached", { storeId: input.session.storeId });
       break;
     }
 

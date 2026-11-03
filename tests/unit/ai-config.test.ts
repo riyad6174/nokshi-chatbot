@@ -66,7 +66,7 @@ describe("Anthropic message conversion", () => {
       { role: "tool", tool_call_id: "t2", content: "{\"ok\":false}", isError: true },
     ]);
 
-    expect(system).toBe("Rules");
+    expect(system).toEqual([{ type: "text", text: "Rules" }]);
     expect(messages).toHaveLength(3);
     expect(messages[1]).toEqual({ role: "assistant", content: raw });
     expect(messages[2]).toEqual({
@@ -76,6 +76,18 @@ describe("Anthropic message conversion", () => {
         { type: "tool_result", tool_use_id: "t2", content: "{\"ok\":false}", is_error: true },
       ],
     });
+  });
+
+  it("puts a cache breakpoint only on system blocks marked cacheable", () => {
+    const { system } = toAnthropicMessages([
+      { role: "system", content: "Stable rules", cache: true },
+      { role: "system", content: "Cart: empty" },
+      { role: "user", content: "hi" },
+    ]);
+    expect(system).toEqual([
+      { type: "text", text: "Stable rules", cache_control: { type: "ephemeral" } },
+      { type: "text", text: "Cart: empty" },
+    ]);
   });
 
   it("maps tool definitions to input_schema", () => {

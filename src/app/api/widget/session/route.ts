@@ -5,6 +5,7 @@ import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
 import { createWidgetToken, readWidgetSessionId, widgetCookieOptions, WIDGET_COOKIE } from "@/lib/auth/widget";
 import { widgetSessionRequestSchema } from "@/lib/validation/schemas";
 import { getCartSummary } from "@/modules/cart/cart.service";
+import { triggerAutoSyncIfDue } from "@/modules/catalog/product-sync.service";
 import { conversationMode, listConversationMessages } from "@/modules/conversations/conversation.service";
 import { ensureProductGreeting } from "@/modules/conversations/greeting.service";
 import {
@@ -85,6 +86,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Keeps an API-synced catalog fresh without a scheduler; runs in the background, at most once per interval.
+  triggerAutoSyncIfDue(context.storeId);
   await ensureProductGreeting(context, parsed.data.productId);
 
   const [cart, messages, conversation] = await Promise.all([

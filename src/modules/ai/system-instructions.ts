@@ -118,7 +118,7 @@ function replyIn(language: "en" | "bn" | "auto" | undefined): string {
   return language === "bn" ? "Bangla (বাংলা)" : "English";
 }
 
-export function buildSystemInstructions(context: {
+type SystemInstructionsContext = {
   session: SessionContext;
   cart: CartPayload;
   configuredInstructions: string | null | undefined;
@@ -130,7 +130,22 @@ export function buildSystemInstructions(context: {
   savedDetails?: SavedDetails | null;
   /** Language of the customer's latest message; "auto" on a live call, where the model hears them. */
   replyLanguage?: "en" | "bn" | "auto";
-}): string {
+};
+
+/** The full prompt as one string (used by realtime voice, which takes a single instructions field). */
+export function buildSystemInstructions(context: SystemInstructionsContext): string {
+  const { stable, perTurn } = buildSystemPromptParts(context);
+  return `${stable}\n\n${perTurn}`;
+}
+
+/**
+ * The prompt in two parts, for prompt caching:
+ * - `stable`: rules, persona, store facts and owner instructions. Identical on every turn of every
+ *   chat for this store and channel; it changes only when the store's settings do.
+ * - `perTurn`: the customer, cart, open order and next step, rebuilt each turn.
+ * Keep anything that varies per session or turn out of `stable`, or it stops being cacheable.
+ */
+export function buildSystemPromptParts(context: SystemInstructionsContext): { stable: string; perTurn: string } {
   const { session, cart } = context;
   const store = session.store;
   const settings = store.settings;
@@ -162,7 +177,7 @@ export function buildSystemInstructions(context: {
   const voice = context.channel === "voice" ? `\n${VOICE_RULES}\n` : "";
   const sales = settings?.salesPlaybookEnabled === false ? "" : `\n${SALES_PLAYBOOK}\n`;
 
-  return `${BASE_RULES}
+  const stable = `${BASE_RULES}
 ${sales}${voice}
 YOUR NAME: ${settings?.assistantName || "Shopping assistant"}
 TONE: ${tone}
@@ -174,17 +189,21 @@ STORE
 - Delivery areas (id: label (fee)): ${delivery}
 - Free delivery: ${freeDelivery}
 - Cash on delivery: ${store.codEnabled ? "available" : "not available"}
-- Supported languages: ${locales.join(", ") || "en"} (conversation hint: ${session.locale})
+- Supported languages: ${locales.join(", ") || "en"}
+
+BUSINESS INSTRUCTIONS FROM THE STORE OWNER
+${context.configuredInstructions?.trim() || "None."}`;
+
+  const perTurn = `CONVERSATION LANGUAGE HINT: ${session.locale}
 
 ${customerOnFile(context.savedDetails)}${context.openOrder ? `OPEN ORDER: ${context.openOrder} If the customer's latest message agrees, call confirm_order now.\n\n` : ""}CURRENT CART (server-calculated)
 ${cartLines}
 - Item count: ${cart.itemCount}
 - Subtotal: ${priceLabel(cart.subtotalMinor, cart.currency)}
 
-BUSINESS INSTRUCTIONS FROM THE STORE OWNER
-${context.configuredInstructions?.trim() || "None."}
-
 THIS TURN (follow strictly)
 - Reply in ${replyIn(context.replyLanguage)}, in ONE short sentence (about 12 words). Don't list or describe products the cards show.
 - Next step toward the order: ${nextOrderStep({ cart, savedDetails: context.savedDetails, openOrder: context.openOrder })}`;
+
+  return { stable, perTurn };
 }

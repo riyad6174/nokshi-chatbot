@@ -36,15 +36,22 @@ export function toAnthropicTools(tools: ProviderTool[]): Anthropic.Beta.BetaTool
  * - Assistant turns produced by this adapter carry their original content blocks in `raw`
  *   (thinking, text, tool_use) and are replayed unchanged, as the API requires.
  * - Consecutive tool results are grouped into one user message, so parallel tool calls stay parallel.
+ * - Each system message becomes a system text block. Blocks marked `cache` get a cache breakpoint:
+ *   tools render before system, so the tool definitions and the unchanging rules are cached together,
+ *   while the per-turn part (cart, next step) after the breakpoint can change freely.
  */
 export function toAnthropicMessages(messages: ProviderMessage[]): {
-  system: string;
+  system: Anthropic.Beta.BetaTextBlockParam[];
   messages: Anthropic.Beta.BetaMessageParam[];
 } {
-  const system = messages
+  const system: Anthropic.Beta.BetaTextBlockParam[] = messages
     .filter((message): message is Extract<ProviderMessage, { role: "system" }> => message.role === "system")
-    .map((message) => message.content)
-    .join("\n\n");
+    .filter((message) => message.content.trim().length > 0)
+    .map((message) => ({
+      type: "text",
+      text: message.content,
+      ...(message.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
+    }));
 
   const output: Anthropic.Beta.BetaMessageParam[] = [];
   for (const message of messages) {
@@ -90,6 +97,7 @@ export async function* streamAnthropic(input: {
   messages: ProviderMessage[];
   tools: ProviderTool[];
   signal?: AbortSignal;
+  toolChoice?: "auto" | "none";
 }): AsyncGenerator<ProviderStreamEvent> {
   const client = createAnthropicClient(input.config);
   const { system, messages } = toAnthropicMessages(input.messages);
@@ -101,10 +109,11 @@ export async function* streamAnthropic(input: {
     {
       model: input.config.model,
       max_tokens: 64000,
-      system,
+      ...(system.length > 0 ? { system } : {}),
       messages,
       tools: toAnthropicTools(input.tools),
-      tool_choice: { type: "auto" },
+      // Changing tool_choice between rounds keeps the tools + system cache intact.
+      tool_choice: { type: input.toolChoice ?? "auto" },
       output_config: { effort: input.config.effort },
       ...(useFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
     },

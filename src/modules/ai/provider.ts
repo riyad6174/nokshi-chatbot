@@ -8,7 +8,8 @@ export type ProviderToolCall = {
 };
 
 export type ProviderMessage =
-  | { role: "system"; content: string }
+  /** `cache`: this block is the same on every turn, so providers that support prompt caching may cache up to it. */
+  | { role: "system"; content: string; cache?: boolean }
   | { role: "user"; content: string }
   | {
       role: "assistant";
@@ -48,6 +49,8 @@ export type StreamCompletionInput = {
   tools: ProviderTool[];
   signal?: AbortSignal;
   temperature?: number;
+  /** "none": the model must answer in text (the tools stay defined so earlier tool calls remain valid). */
+  toolChoice?: "auto" | "none";
 };
 
 function combineSignals(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
@@ -102,8 +105,15 @@ function openAiHeaders(config: Pick<AiConfig, "apiKey">): Record<string, string>
 }
 
 function toOpenAiMessages(messages: ProviderMessage[]) {
+  // One system message: some OpenAI-compatible servers reject or ignore a second one.
+  const system = messages
+    .filter((message): message is Extract<ProviderMessage, { role: "system" }> => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
+  const rest = messages.filter((message) => message.role !== "system");
+
   // Strip fields that only the Anthropic adapter understands.
-  return messages.map((message) => {
+  const converted = rest.map((message) => {
     if (message.role === "assistant") {
       return { role: message.role, content: message.content, ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}) };
     }
@@ -112,18 +122,72 @@ function toOpenAiMessages(messages: ProviderMessage[]) {
     }
     return message;
   });
+  return system ? [{ role: "system" as const, content: system }, ...converted] : converted;
+}
+
+const MAX_RETRIES = 2;
+const MAX_RETRY_DELAY_MS = 8_000;
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+/** Retry-After in seconds or as an HTTP date; otherwise exponential backoff with jitter. */
+function retryDelayMs(response: Response | null, attempt: number): number {
+  const header = response?.headers.get("retry-after");
+  if (header) {
+    const seconds = Number(header);
+    const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now();
+    if (Number.isFinite(ms)) return Math.min(Math.max(ms, 0), MAX_RETRY_DELAY_MS);
+  }
+  return Math.min(500 * 2 ** attempt + Math.random() * 250, MAX_RETRY_DELAY_MS);
+}
+
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Retries rate limits, overloads, server errors and dropped connections before any of the reply has
+ * streamed, so a brief provider hiccup doesn't count as a miss. The caller's signal (including its
+ * timeout) bounds the total time across attempts.
+ */
+async function fetchWithRetry(url: string, init: RequestInit & { signal: AbortSignal }): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    let response: Response | null = null;
+    try {
+      response = await fetch(url, init);
+      if (response.ok || !isRetryableStatus(response.status) || attempt >= MAX_RETRIES) return response;
+      await response.body?.cancel().catch(() => undefined);
+    } catch (error) {
+      if (init.signal.aborted || attempt >= MAX_RETRIES) throw error;
+    }
+    logger.warn("ai.provider_retry", { attempt: attempt + 1, status: response?.status ?? null });
+    await wait(retryDelayMs(response, attempt), init.signal);
+  }
 }
 
 async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGenerator<ProviderStreamEvent> {
   const { config } = input;
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+  const response = await fetchWithRetry(`${config.baseUrl}/chat/completions`, {
     method: "POST",
     headers: openAiHeaders(config),
     body: JSON.stringify({
       model: config.model,
       messages: toOpenAiMessages(input.messages),
       tools: input.tools,
-      tool_choice: "auto",
+      tool_choice: input.toolChoice ?? "auto",
       temperature: input.temperature ?? 0.2,
       stream: true,
     }),
@@ -193,6 +257,7 @@ export async function* streamCompletion(input: StreamCompletionInput): AsyncGene
       config: input.config,
       messages: input.messages,
       tools: input.tools,
+      toolChoice: input.toolChoice,
       // Claude turns with thinking can take longer than a plain completion.
       signal: combineSignals(input.signal, 120_000),
     });
