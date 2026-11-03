@@ -49,9 +49,13 @@ function startErrorMessage(caught: unknown): string {
 }
 
 type Grant = { clientSecret: string; opener: string; expiresAt: number };
+/** A grant plus when this browser received it (the customer's clock can be off from OpenAI's). */
+type HeldGrant = Grant & { receivedAt: number };
 
-/** A pre-fetched call token is used only while it has at least this long left (seconds). */
-const GRANT_MIN_LIFE_S = 90;
+/** Tokens live 10 minutes; a pre-fetched one is used only while it has at least ~1.5 minutes left. */
+const GRANT_USABLE_MS = 8 * 60_000;
+/** A dropped connection often comes back by itself (Wi-Fi/mobile hand-over); wait this long first. */
+const RECONNECT_GRACE_MS = 8_000;
 
 let preconnected = false;
 /** Opens the TLS connection to OpenAI early, so the call's handshake doesn't pay for it. */
@@ -96,6 +100,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
   /** Customer transcripts still being saved, so a reply is stored after the words it answers. */
   const pendingUserRef = useRef<Promise<unknown>>(Promise.resolve());
   const toolsRunningRef = useRef<Map<string, Promise<void>>>(new Map());
+  const dropTimerRef = useRef<number | null>(null);
 
   const setPhase = useCallback((next: VoicePhase) => {
     phaseRef.current = next;
@@ -259,8 +264,10 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
   const teardown = useCallback(() => {
     if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
     if (sessionTimerRef.current) window.clearTimeout(sessionTimerRef.current);
+    if (dropTimerRef.current) window.clearTimeout(dropTimerRef.current);
     idleTimerRef.current = null;
     sessionTimerRef.current = null;
+    dropTimerRef.current = null;
     if (meterRef.current) {
       cancelAnimationFrame(meterRef.current.frame);
       void meterRef.current.context.close().catch(() => undefined);
@@ -291,15 +298,15 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
   /** Call synchronously inside the click that starts voice, before any await (autoplay rules). */
   // A call token fetched before the customer taps (hover, welcome bubble), so tapping goes straight
   // to the microphone and the WebRTC handshake. Tokens cost nothing until a call is made with them.
-  const grantRef = useRef<Grant | null>(null);
-  const grantLoadRef = useRef<Promise<Grant | null> | null>(null);
-  const fetchGrant = useCallback((): Promise<Grant | null> => {
+  const grantRef = useRef<HeldGrant | null>(null);
+  const grantLoadRef = useRef<Promise<HeldGrant> | null>(null);
+  const fetchGrant = useCallback((): Promise<HeldGrant> => {
     grantLoadRef.current ??= postJson<Grant>("/api/widget/voice/realtime/session", {})
       .then((grant) => {
-        grantRef.current = grant;
-        return grant;
+        const held = { ...grant, receivedAt: Date.now() };
+        grantRef.current = held;
+        return held;
       })
-      .catch(() => null)
       .finally(() => {
         grantLoadRef.current = null;
       });
@@ -307,14 +314,15 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
   }, []);
   const freshGrant = () => {
     const grant = grantRef.current;
-    return grant && grant.expiresAt - Date.now() / 1000 > GRANT_MIN_LIFE_S ? grant : null;
+    return grant && Date.now() - grant.receivedAt < GRANT_USABLE_MS ? grant : null;
   };
 
   /** Gets a call ready ahead of a tap. Safe to call often. */
   const warmUp = useCallback(() => {
     preconnectToOpenAi();
     if (phaseRef.current !== "off" || freshGrant() || grantLoadRef.current) return;
-    void fetchGrant();
+    // A failed warm-up is retried (with its real error shown) when the customer taps.
+    fetchGrant().catch(() => undefined);
   }, [fetchGrant]);
 
   const prime = useCallback(() => {
@@ -367,7 +375,6 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
             ? Promise.resolve(ready)
             : (grantLoadRef.current ?? fetchGrant()).then((grant) => {
                 grantRef.current = null;
-                if (!grant) throw new Error("Live voice couldn't start. Please try again.");
                 return grant;
               }),
           navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
@@ -376,7 +383,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
         if (micResult.status === "fulfilled") micRef.current = micResult.value;
         if (micResult.status === "rejected") throw micResult.reason;
         if (grantResult.status === "rejected") throw grantResult.reason;
-        const grant = grantResult.value;
+        let grant = grantResult.value;
         const mic = micResult.value;
 
         const pc = new RTCPeerConnection();
@@ -387,10 +394,24 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
             void audioRef.current.play().catch(() => undefined);
           }
         };
+        const dropped = () => {
+          if (pcRef.current !== pc) return;
+          setError("The voice call was disconnected. Tap Talk to start again.");
+          stopRef.current();
+        };
         pc.onconnectionstatechange = () => {
-          if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-            setError("The voice call was disconnected. Tap Talk to start again.");
-            stopRef.current();
+          const state = pc.connectionState;
+          if (state === "connected") {
+            if (dropTimerRef.current) window.clearTimeout(dropTimerRef.current);
+            dropTimerRef.current = null;
+          } else if (state === "failed") {
+            dropped();
+          } else if (state === "disconnected" && !dropTimerRef.current) {
+            // Often a brief network blip (Wi-Fi/mobile hand-over) that recovers by itself.
+            dropTimerRef.current = window.setTimeout(() => {
+              dropTimerRef.current = null;
+              if (pc.connectionState !== "connected") dropped();
+            }, RECONNECT_GRACE_MS);
           }
         };
         for (const track of mic.getTracks()) pc.addTrack(track, mic);
@@ -404,16 +425,34 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
             // Ignore malformed events.
           }
         };
-        const opened = new Promise<void>((resolve) => channel.addEventListener("open", () => resolve(), { once: true }));
+        // The voice service closed the call on its side.
+        channel.addEventListener("close", () => {
+          if (phaseRef.current !== "starting") dropped();
+        });
+        const opened = new Promise<void>((resolve, reject) => {
+          channel.addEventListener("open", () => resolve(), { once: true });
+          window.setTimeout(() => reject(new Error("The voice service didn't answer. Check your connection and try again.")), 15_000);
+        });
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        const answer = await fetch(REALTIME_CALLS_URL, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${grant.clientSecret}`, "Content-Type": "application/sdp" },
-          body: offer.sdp,
-        });
-        if (!answer.ok) throw new Error("The voice service refused the call.");
+        const call = (secret: string) =>
+          fetch(REALTIME_CALLS_URL, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/sdp" },
+            body: offer.sdp,
+          });
+        let answer = await call(grant.clientSecret);
+        if (!answer.ok && answer.status < 500 && grant === ready) {
+          // The pre-fetched token wasn't accepted any more (expired or used): get a new one.
+          grant = await fetchGrant();
+          grantRef.current = null;
+          answer = await call(grant.clientSecret);
+        }
+        if (!answer.ok) {
+          console.warn("realtime call refused:", answer.status, await answer.text().catch(() => ""));
+          throw new Error("The voice service refused the call. Please try again in a moment.");
+        }
         await pc.setRemoteDescription({ type: "answer", sdp: await answer.text() });
         await opened;
 

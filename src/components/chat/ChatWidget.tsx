@@ -605,6 +605,11 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     setOpen(true);
     const active = sessionRef.current ?? (await initSession());
     if (!active) return;
+    if (!window.isSecureContext) {
+      // Browsers only allow the microphone on https:// pages (and localhost).
+      setError({ message: "Voice needs a secure (https://) connection to this site. You can keep chatting by text." });
+      return;
+    }
     const caps = voiceSupport();
     const configured = active.settings.voiceAssistant;
     const lang: VoiceLang = active.store.supportedLocales.some((locale) => locale.startsWith("bn")) ? "bn" : "en";

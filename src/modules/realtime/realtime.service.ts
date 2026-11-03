@@ -146,7 +146,13 @@ export async function createRealtimeSession(context: SessionContext): Promise<Re
   } | null;
   if (!response.ok || !body?.value) {
     logger.error("realtime.session_failed", { status: response.status, error: body?.error?.message?.slice(0, 300) });
-    throw new RealtimeError("Live voice could not start. Please try again.", response.status);
+    const reason =
+      response.status === 401
+        ? "Live voice couldn't start: the OpenAI key in Admin → AI model was rejected."
+        : response.status === 429
+          ? "Live voice is busy or the OpenAI account is out of credit. Please try again later."
+          : "Live voice could not start. Please try again.";
+    throw new RealtimeError(reason, response.status);
   }
   return { clientSecret: body.value, expiresAt: body.expires_at ?? 0, model: env.REALTIME_MODEL, opener: openerInstruction(saved) };
 }

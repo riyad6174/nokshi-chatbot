@@ -12,8 +12,11 @@ export const dynamic = "force-dynamic";
 
 /** Starts a live voice call: returns a short-lived token for the browser's WebRTC connection. */
 export async function POST(request: NextRequest) {
-  const ipRate = checkRateLimit(`realtime:ip:${getClientIp(request)}`, 10, 60_000);
-  if (!ipRate.allowed) return jsonError(429, "rate_limited", "Too many voice calls. Please wait a moment.");
+  // Without a forwarded client IP (some proxies drop it) every visitor would share one limit; the
+  // per-session limit below still applies.
+  const ip = getClientIp(request);
+  const ipRate = ip === "unknown" ? null : checkRateLimit(`realtime:ip:${ip}`, 20, 60_000);
+  if (ipRate && !ipRate.allowed) return jsonError(429, "rate_limited", "Too many voice calls. Please wait a moment.");
 
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return jsonError(401, "session_required", "Start a chat session first.");
