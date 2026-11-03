@@ -104,6 +104,8 @@ export type ChatPart =
   | { type: "details_form"; prefill: Partial<CustomerDetailsData> }
   | { type: "order_status"; orders: OrderStatusData[] }
   | { type: "order_confirmation"; confirmation: OrderConfirmationData }
+  /** Takes the customer to a page of the store (a product page, checkout). Not shown as a card. */
+  | { type: "navigate"; url: string; label: string }
   /** Editable contact/delivery form; the customer sends it back as a message with the exact details. */
   | {
       type: "contact_form";
@@ -147,7 +149,8 @@ export type WidgetSettingsPayload = {
   suggestedTopics: SuggestedTopic[];
   voiceEnabled: boolean;
   /** Hands-free voice assistant. speech "server": cloud STT/TTS; "browser": the browser's own recognition and voices. */
-  voiceAssistant: { enabled: boolean; speech: "server" | "browser"; maxSessionMinutes: number };
+  /** engine "realtime": OpenAI Realtime over WebRTC; "cascade": speech-to-text, chat model, text-to-speech. */
+  voiceAssistant: { enabled: boolean; speech: "server" | "browser"; engine: "realtime" | "cascade"; maxSessionMinutes: number };
   attachmentsEnabled: boolean;
   theme: { accent?: string; position?: "left" | "right" };
   aiMode: "live" | "demo";

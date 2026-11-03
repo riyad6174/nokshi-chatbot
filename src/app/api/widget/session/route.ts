@@ -19,6 +19,7 @@ import { prisma } from "@/lib/db/prisma";
 import { env } from "@/lib/config/env";
 import { speechMode } from "@/modules/speech/config";
 import { voiceAssistantEnabled } from "@/modules/speech/greeting";
+import { voiceEngine } from "@/modules/realtime/realtime.service";
 import type { SuggestedTopic, WidgetSessionResponse } from "@/types/chat";
 
 export const runtime = "nodejs";
@@ -114,6 +115,7 @@ export async function POST(request: NextRequest) {
       voiceAssistant: {
         enabled: voiceAssistantEnabled(context.store),
         speech: speechMode(),
+        engine: voiceEngine(context.store),
         maxSessionMinutes: env.VOICE_MAX_SESSION_MINUTES,
       },
       attachmentsEnabled: settings?.attachmentsEnabled ?? true,

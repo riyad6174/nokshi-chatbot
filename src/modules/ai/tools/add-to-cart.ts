@@ -2,7 +2,7 @@ import { z } from "zod";
 import { addItem } from "@/modules/cart/cart.service";
 import { prisma } from "@/lib/db/prisma";
 import { isObjectId } from "@/lib/db/ids";
-import { cartCompact, cartErrorToResult, failure, success } from "@/modules/ai/tools/helpers";
+import { cartCompact, cartErrorToResult, failure, productIdByName, success } from "@/modules/ai/tools/helpers";
 import type { ToolDefinition } from "@/modules/ai/tools/types";
 
 const schema = z.object({
@@ -14,16 +14,6 @@ const schema = z.object({
   variant: z.string().trim().min(1).max(100).nullish(),
   quantity: z.number().int().min(1).max(99).default(1),
 });
-
-/** An active product's id from its name, matched loosely; null unless exactly one matches. */
-async function productIdByName(storeId: string, name: string): Promise<string | null> {
-  const products = await prisma.product.findMany({ where: { storeId, status: "active" }, select: { id: true, name: true } });
-  const wanted = name.trim().toLowerCase();
-  const exact = products.find((product) => product.name.toLowerCase() === wanted);
-  if (exact) return exact.id;
-  const partial = products.filter((product) => product.name.toLowerCase().includes(wanted) || wanted.includes(product.name.toLowerCase()));
-  return partial.length === 1 ? partial[0]!.id : null;
-}
 
 /** A variant id from its title, matched loosely ("silver" -> "Silver / Tan leather"). */
 async function variantIdByTitle(productId: string, title: string): Promise<string | null> {

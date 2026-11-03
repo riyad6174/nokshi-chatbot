@@ -4,13 +4,15 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 
 async function openAssistant(page: Page, path = "/") {
   await page.goto(path);
-  await page.getByRole("button", { name: "Open shopping assistant" }).click();
+  // The launcher starts a voice call; these journeys switch to the text chat.
+  await page.getByRole("button", { name: "Talk to the AI shopping assistant" }).click();
+  await page.getByRole("button", { name: "Open text chat" }).click({ timeout: 60_000 });
   // Generous timeout: the dev server compiles routes on first request.
-  await expect(page.getByPlaceholder(/Ask about a product/)).toBeEnabled({ timeout: 60_000 });
+  await expect(page.getByPlaceholder(/Ask me anything/)).toBeEnabled({ timeout: 60_000 });
 }
 
 async function send(page: Page, text: string) {
-  const composer = page.getByPlaceholder(/Ask about a product|Message our team/);
+  const composer = page.getByPlaceholder(/Ask me anything|Message our team/);
   await composer.fill(text);
   await composer.press("Enter");
 }

@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ChatWidget } from "@/components/chat/ChatWidget";
 import { AskAssistantButton } from "@/components/storefront/AskAssistantButton";
 import { formatMinor } from "@/lib/money";
 import { searchProducts } from "@/modules/catalog/product.service";
@@ -313,7 +312,6 @@ export default async function StorefrontPage() {
         </div>
       </footer>
 
-      <ChatWidget />
     </div>
   );
 }

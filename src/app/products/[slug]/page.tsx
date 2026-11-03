@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChatWidget } from "@/components/chat/ChatWidget";
+import { ChatProductContext } from "@/components/chat/ChatProductContext";
 import { AskAssistantButton } from "@/components/storefront/AskAssistantButton";
 import { prisma } from "@/lib/db/prisma";
 import { formatMinor } from "@/lib/money";
@@ -109,7 +109,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
         </div>
       </main>
 
-      <ChatWidget productId={product.id} />
+      <ChatProductContext productId={product.id} />
     </div>
   );
 }

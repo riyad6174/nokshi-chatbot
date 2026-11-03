@@ -1,3 +1,4 @@
+import { prisma } from "@/lib/db/prisma";
 import { priceLabel } from "@/lib/money";
 import { CartError, getActiveCart, getCartSummary } from "@/modules/cart/cart.service";
 import type { CartPayload, ChatPart, ProductCardData } from "@/types/chat";
@@ -74,4 +75,14 @@ export function cartErrorToResult(error: unknown): ToolExecutionResult {
     return failure(error.code, message, error.details);
   }
   throw error;
+}
+
+/** An active product's id from its name, matched loosely; null unless exactly one matches. */
+export async function productIdByName(storeId: string, name: string): Promise<string | null> {
+  const products = await prisma.product.findMany({ where: { storeId, status: "active" }, select: { id: true, name: true } });
+  const wanted = name.trim().toLowerCase();
+  const exact = products.find((product) => product.name.toLowerCase() === wanted);
+  if (exact) return exact.id;
+  const partial = products.filter((product) => product.name.toLowerCase().includes(wanted) || wanted.includes(product.name.toLowerCase()));
+  return partial.length === 1 ? partial[0]!.id : null;
 }

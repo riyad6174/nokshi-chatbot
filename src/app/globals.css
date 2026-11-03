@@ -299,3 +299,141 @@
     transform: translate3d(var(--drift, 0px), 640px, 0) rotate(var(--spin, 540deg));
   }
 }
+
+/* ---- Voice dock: the voice-first assistant panel ------------------------------------------- */
+
+/* Slow drifting colour light behind the orb. data-phase on .voice-dock makes it react: brighter
+   and quicker while someone is talking. */
+.voice-aurora {
+  position: absolute;
+  inset: -30%;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 35% at 25% 30%, var(--aurora-a, rgba(99, 102, 241, 0.55)), transparent 70%),
+    radial-gradient(35% 30% at 75% 25%, var(--aurora-b, rgba(236, 72, 153, 0.45)), transparent 70%),
+    radial-gradient(45% 40% at 55% 80%, var(--aurora-c, rgba(6, 182, 212, 0.4)), transparent 70%);
+  filter: blur(28px);
+  opacity: 0.55;
+  animation: aurora-drift 14s ease-in-out infinite alternate;
+  transition: opacity 600ms ease;
+}
+
+.voice-dock[data-phase="hearing"] .voice-aurora {
+  --aurora-a: rgba(16, 185, 129, 0.6);
+  --aurora-c: rgba(6, 182, 212, 0.55);
+  opacity: 0.85;
+  animation-duration: 6s;
+}
+
+.voice-dock[data-phase="speaking"] .voice-aurora {
+  --aurora-b: rgba(217, 70, 239, 0.6);
+  opacity: 0.9;
+  animation-duration: 5s;
+}
+
+.voice-dock[data-phase="thinking"] .voice-aurora {
+  opacity: 0.75;
+  animation-duration: 4s;
+}
+
+.voice-dock[data-phase="paused"] .voice-aurora,
+.voice-dock[data-phase="off"] .voice-aurora {
+  opacity: 0.35;
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) rotate(0deg) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, 4%, 0) rotate(8deg) scale(1.08);
+  }
+  100% {
+    transform: translate3d(5%, -3%, 0) rotate(-6deg) scale(1.02);
+  }
+}
+
+/* Captions: each new reply rises in softly; long replies fade out at the top. */
+.voice-caption {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 100%);
+}
+
+.caption-in {
+  animation: caption-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes caption-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+/* Action cards floating up above the dock. */
+.card-float-in {
+  animation: card-float-in 520ms cubic-bezier(0.18, 0.9, 0.25, 1.15) both;
+}
+
+@keyframes card-float-in {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.94);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Soft halo rings around the dock orb while listening. */
+.listen-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(110, 231, 183, 0.55);
+  animation: listen-ring 2.4s ease-out infinite;
+  pointer-events: none;
+}
+
+.listen-ring:nth-child(2) {
+  animation-delay: 1.2s;
+}
+
+@keyframes listen-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-aurora,
+  .listen-ring {
+    animation: none;
+  }
+}
+
+/* The page blur behind the open voice assistant fades in. */
+.backdrop-in {
+  animation: backdrop-in 320ms ease-out both;
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

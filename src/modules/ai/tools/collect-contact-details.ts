@@ -7,7 +7,8 @@ import { deliveryAreas } from "@/modules/orders/voice-order.service";
 
 const schema = z.object({
   name: z.string().trim().max(100).optional(),
-  phone: z.string().trim().max(40).optional(),
+  // Generous: a number said in words ("জিরো ওয়ান সেভেন…") is long until converted to digits.
+  phone: z.string().trim().max(200).optional(),
   address: z.string().trim().max(400).optional(),
   city: z.string().trim().max(100).optional(),
   deliveryAreaId: z.string().trim().max(50).optional(),

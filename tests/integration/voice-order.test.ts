@@ -176,10 +176,10 @@ describe("finding products and collecting details in Bangla", () => {
     const bags = await executeTool({ session }, "search_products", JSON.stringify({ query: "ব্যাগ" }));
     expect((bags.content as { count: number }).count).toBeGreaterThanOrEqual(2);
     const shoes = await executeTool({ session }, "search_products", JSON.stringify({ query: "জুতা" }));
-    // Not sold: no match, but the customer still sees real products from the store's categories.
+    // Not sold: no cards the customer didn't ask for, just the categories the store does have.
     const content = shoes.content as { matched: boolean; count: number; storeCategories: string[] };
     expect(content.matched).toBe(false);
-    expect(content.count).toBeGreaterThan(0);
+    expect(content.count).toBe(0);
     expect(content.storeCategories.sort()).toEqual(["Accessories", "Bags"]);
   });
 

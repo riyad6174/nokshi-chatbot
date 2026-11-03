@@ -17,6 +17,7 @@ import { confirmOrderTool } from "@/modules/ai/tools/confirm-order";
 import { getRecommendationsTool } from "@/modules/ai/tools/get-recommendations";
 import { saveCustomerProfileTool } from "@/modules/ai/tools/save-customer-profile";
 import { collectContactDetailsTool } from "@/modules/ai/tools/collect-contact-details";
+import { goToCheckoutTool, openProductPageTool } from "@/modules/ai/tools/navigation";
 import type { ToolContext, ToolDefinition, ToolExecutionResult } from "@/modules/ai/tools/types";
 
 const tools: ToolDefinition[] = [
@@ -34,6 +35,8 @@ const tools: ToolDefinition[] = [
   confirmOrderTool,
   saveCustomerProfileTool,
   collectContactDetailsTool,
+  openProductPageTool,
+  goToCheckoutTool,
   getOrderStatusTool,
   requestHumanTool,
 ];

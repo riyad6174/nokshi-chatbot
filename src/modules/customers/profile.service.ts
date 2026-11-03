@@ -1,3 +1,4 @@
+import { findPhoneNumber } from "@/lib/digits";
 import type { CustomerProfile, MarketingConsent, Order } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { logger } from "@/lib/logging/logger";
@@ -134,6 +135,18 @@ export async function upsertProfile(
       ...(profile.visitorIds.includes(session.visitorId) ? {} : { visitorIds: { push: session.visitorId } }),
     },
   });
+}
+
+/** Saves a phone number the customer said, right away, so it's never lost or re-asked. */
+export async function capturePhoneFromSpeech(
+  context: { storeId: string; visitorId: string; locale: string },
+  text: string,
+): Promise<void> {
+  const phone = findPhoneNumber(text);
+  if (!phone) return;
+  await upsertProfile({ storeId: context.storeId, visitorId: context.visitorId }, { phone, preferredLocale: context.locale }).catch(
+    () => undefined,
+  );
 }
 
 export type SavedDetails = { name: string; phone: string; address: string; city: string; deliveryAreaId: string };

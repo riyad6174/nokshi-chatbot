@@ -33,6 +33,22 @@ const envSchema = z.object({
   SPEECH_VOICE_BN: blankAsUnset(z.string().default("")),
   // Speaking speed for Azure voices, e.g. "+10%" (a bit faster than normal) or "0%".
   SPEECH_RATE: blankAsUnset(z.string().regex(/^[+-]?\d{1,2}%$/, "SPEECH_RATE looks like +10%").default("+10%")),
+  // Voice engine. realtime: OpenAI Realtime over WebRTC (one streaming model hears, thinks and
+  // speaks; fastest). cascade: speech-to-text -> chat model -> text-to-speech (SPEECH_PROVIDER).
+  VOICE_ENGINE: blankAsUnset(z.enum(["realtime", "cascade"]).default("realtime")),
+  REALTIME_MODEL: blankAsUnset(z.string().default("gpt-realtime-2")),
+  REALTIME_VOICE: blankAsUnset(z.string().default("marin")),
+  // How the live voice speaks: tone, warmth, pace.
+  REALTIME_VOICE_STYLE: blankAsUnset(
+    z
+      .string()
+      .max(500)
+      .default(
+        "A warm, cheerful young Bangladeshi woman helping a customer on the phone: relaxed and natural, smiling while she talks, quick and easy-going, never stiff, robotic or overly formal.",
+      ),
+  ),
+  // Speaking speed of the live voice: 1 is normal; a little faster sounds livelier.
+  REALTIME_VOICE_SPEED: blankAsUnset(z.coerce.number().min(0.75).max(1.4).default(1.08)),
   VOICE_MAX_SESSION_MINUTES: blankAsUnset(z.coerce.number().int().min(1).max(120).default(15)),
 });
 
@@ -67,6 +83,11 @@ const data = parsed.data as {
   SPEECH_VOICE_EN: string;
   SPEECH_VOICE_BN: string;
   SPEECH_RATE: string;
+  VOICE_ENGINE: "realtime" | "cascade";
+  REALTIME_MODEL: string;
+  REALTIME_VOICE: string;
+  REALTIME_VOICE_STYLE: string;
+  REALTIME_VOICE_SPEED: number;
   VOICE_MAX_SESSION_MINUTES: number;
 };
 

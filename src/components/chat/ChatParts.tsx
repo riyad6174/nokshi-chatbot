@@ -261,7 +261,7 @@ export function ContactForm({
 /** Shown when an order has just been placed from the chat. */
 export function OrderSuccessCard({ order, accent }: { order: OrderStatusData; accent: string }) {
   return (
-    <div className="animate-pop overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm">
+    <div className="animate-pop overflow-hidden rounded-2xl border border-emerald-200 bg-white">
       <div className="bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 px-3.5 py-3 text-white">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/25" aria-hidden="true">
@@ -335,102 +335,167 @@ export function OrderConfirmationCard({
     setEditing(false);
     onEdit(detailsMessage("Please update my order details", draft));
   };
+  const itemCount = confirmation.lines.reduce((sum, line) => sum + line.quantity, 0);
   return (
-    <div className="animate-fade-up overflow-hidden rounded-xl border bg-white text-[12px]" style={{ borderColor: `${accent}55` }}>
-      <div className="flex items-center justify-between px-3 py-2 text-white" style={{ backgroundColor: accent }}>
-        <p className="text-[12.5px] font-semibold">Confirm your order</p>
-        <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10.5px] font-semibold">Cash on delivery</span>
-      </div>
-      <div className="space-y-2 p-3">
-        <ul className="space-y-0.5 text-stone-700">
-          {confirmation.lines.map((line, index) => (
-            <li key={index} className="flex justify-between gap-2">
-              <span className="truncate">
-                {line.quantity} × {line.name}
-                {line.variantTitle ? ` (${line.variantTitle})` : ""}
+    <div className="animate-fade-up text-[12.5px]">
+      {/* Where they are in the order: cart and details done, confirmation next. */}
+      <ol className="mb-3 flex items-center gap-1.5 text-[10.5px] font-semibold" aria-label="Order progress">
+        {["Cart", "Details", state === "placed" ? "Placed" : "Confirm"].map((step, index) => {
+          const done = index < 2 || state === "placed";
+          return (
+            <li key={step} className="flex flex-1 items-center gap-1.5">
+              <span
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${done ? "text-white" : "bg-white ring-2"}`}
+                style={done ? { backgroundColor: accent } : { color: accent, boxShadow: `inset 0 0 0 2px ${accent}` }}
+              >
+                {done ? (
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="3.2">
+                    <path d="M5 12.5l4.5 4.5L19 7.5" />
+                  </svg>
+                ) : (
+                  index + 1
+                )}
               </span>
-              <span className="shrink-0">{formatMoney(line.lineTotalMinor, confirmation.currency)}</span>
+              <span className={done ? "text-stone-700" : ""} style={done ? undefined : { color: accent }}>
+                {step}
+              </span>
+              {index < 2 ? <span className="h-px flex-1 bg-stone-200" aria-hidden="true" /> : null}
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className="rounded-2xl bg-stone-50 p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">
+            {itemCount} {itemCount === 1 ? "item" : "items"}
+          </p>
+          <span className="rounded-full bg-white px-2 py-0.5 text-[10.5px] font-semibold text-stone-600 ring-1 ring-stone-200">Cash on delivery</span>
+        </div>
+        <ul className="space-y-2">
+          {confirmation.lines.map((line, index) => (
+            <li key={index} className="flex items-center gap-2.5">
+              <span
+                className="flex h-7 min-w-7 shrink-0 items-center justify-center rounded-lg px-1 text-[11px] font-bold"
+                style={{ backgroundColor: `${accent}18`, color: accent }}
+              >
+                {line.quantity}×
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-stone-900">{line.name}</span>
+                {line.variantTitle ? <span className="block truncate text-[11px] text-stone-500">{line.variantTitle}</span> : null}
+              </span>
+              <span className="shrink-0 font-semibold text-stone-900">{formatMoney(line.lineTotalMinor, confirmation.currency)}</span>
             </li>
           ))}
         </ul>
-        <div className="space-y-0.5 border-t border-stone-100 pt-1.5 text-stone-600">
+        <div className="mt-3 space-y-1 border-t border-dashed border-stone-300 pt-2.5 text-stone-600">
           <div className="flex justify-between">
             <span>Subtotal</span>
             <span>{formatMoney(confirmation.subtotalMinor, confirmation.currency)}</span>
           </div>
           <div className="flex justify-between">
             <span>Delivery{confirmation.deliveryArea ? ` · ${confirmation.deliveryArea}` : ""}</span>
-            <span>{confirmation.shippingMinor === 0 ? "Free" : formatMoney(confirmation.shippingMinor, confirmation.currency)}</span>
+            <span className={confirmation.shippingMinor === 0 ? "font-semibold text-emerald-600" : ""}>
+              {confirmation.shippingMinor === 0 ? "Free" : formatMoney(confirmation.shippingMinor, confirmation.currency)}
+            </span>
           </div>
-          <div className="flex justify-between text-[13px] font-semibold text-stone-900">
-            <span>Total to pay on delivery</span>
-            <span>{formatMoney(confirmation.totalMinor, confirmation.currency)}</span>
+          <div className="flex items-baseline justify-between pt-1">
+            <span className="font-semibold text-stone-900">Total</span>
+            <span className="text-[19px] font-bold tracking-tight" style={{ color: accent }}>
+              {formatMoney(confirmation.totalMinor, confirmation.currency)}
+            </span>
           </div>
         </div>
-        {editing ? (
-          <form
-            className="space-y-1.5 rounded-lg bg-stone-50 p-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveEdits();
-            }}
-          >
-            <DetailFields value={draft} onChange={setDraft} />
-            <div className="flex gap-2 pt-0.5">
-              <button
-                type="button"
-                onClick={() => setEditing(false)}
-                className="flex-1 rounded-lg border border-stone-200 bg-white py-1.5 text-[11.5px] font-medium text-stone-600"
-              >
-                Cancel
-              </button>
-              <button type="submit" className="flex-[1.4] rounded-lg py-1.5 text-[11.5px] font-semibold text-white" style={{ backgroundColor: accent }}>
-                Save changes
-              </button>
-            </div>
-          </form>
-        ) : (
-          <div className="relative rounded-lg bg-stone-50 px-2.5 py-2 text-[11.5px] leading-snug text-stone-700">
-            <p className="font-semibold text-stone-900">{customer.name}</p>
-            <p className="font-mono tracking-wide">{customer.phone}</p>
-            <p>
-              {customer.address}
-              {customer.city ? `, ${customer.city}` : ""}
-            </p>
-            {customer.notes ? <p className="text-stone-500">“{customer.notes}”</p> : null}
+      </div>
+
+      {editing ? (
+        <form
+          className="mt-3 space-y-1.5 rounded-2xl bg-stone-50 p-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveEdits();
+          }}
+        >
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Delivery details</p>
+          <DetailFields value={draft} onChange={setDraft} />
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="flex-1 rounded-xl border border-stone-200 bg-white py-2 text-[12px] font-medium text-stone-600"
+            >
+              Cancel
+            </button>
+            <button type="submit" className="flex-[1.4] rounded-xl py-2 text-[12px] font-semibold text-white" style={{ backgroundColor: accent }}>
+              Save changes
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="mt-3 rounded-2xl border border-stone-200 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Deliver to</p>
             {state === "open" ? (
               <button
                 type="button"
                 onClick={() => setEditing(true)}
-                className="absolute right-1.5 top-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold underline-offset-2 hover:underline"
+                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold transition hover:bg-stone-100"
                 style={{ color: accent }}
               >
-                Edit details
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" />
+                </svg>
+                Edit
               </button>
             ) : null}
           </div>
-        )}
-        {state === "open" && !editing ? (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onConfirm}
-              disabled={busy}
-              className="w-full rounded-lg py-2.5 text-[13px] font-semibold text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
-              style={{ backgroundColor: accent }}
-            >
-              {busy ? "Placing order…" : "Confirm order"}
-            </button>
-          </div>
-        ) : state !== "open" ? (
-          <p className="text-center text-[11px] text-stone-500">
-            {state === "placed" ? "This order was placed." : "This summary was replaced by a newer one."}
-          </p>
-        ) : null}
-        {state === "open" && !editing ? (
-          <p className="text-center text-[10.5px] text-stone-400">Or just say “confirm”. Nothing is charged now.</p>
-        ) : null}
-      </div>
+          <dl className="space-y-1.5 text-stone-700">
+            {[
+              { icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0", value: customer.name, strong: true },
+              { icon: "M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2", value: customer.phone, mono: true },
+              {
+                icon: "M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12zM12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
+                value: [customer.address, customer.city].filter(Boolean).join(", "),
+              },
+            ].map((row) => (
+              <div key={row.icon} className="flex items-start gap-2">
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d={row.icon} />
+                </svg>
+                <dd className={`min-w-0 ${row.strong ? "font-semibold text-stone-900" : ""} ${row.mono ? "font-mono tracking-wide" : ""}`}>{row.value}</dd>
+              </div>
+            ))}
+            {customer.notes ? <p className="pl-5 text-[11.5px] text-stone-500">“{customer.notes}”</p> : null}
+          </dl>
+        </div>
+      )}
+
+      {state === "open" && !editing ? (
+        <>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-[14px] font-semibold text-white transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
+            style={{ backgroundColor: accent }}
+          >
+            {busy ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />
+            ) : (
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.6">
+                <path d="M5 12.5l4.5 4.5L19 7.5" />
+              </svg>
+            )}
+            {busy ? "Placing order…" : `Confirm order · ${formatMoney(confirmation.totalMinor, confirmation.currency)}`}
+          </button>
+          <p className="mt-1.5 text-center text-[11px] text-stone-400">Or just say “confirm”. You pay when it arrives.</p>
+        </>
+      ) : state !== "open" ? (
+        <p className="mt-3 text-center text-[11.5px] text-stone-500">
+          {state === "placed" ? "This order was placed." : "This summary was replaced by a newer one."}
+        </p>
+      ) : null}
     </div>
   );
 }

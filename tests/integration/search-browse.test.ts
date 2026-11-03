@@ -37,10 +37,11 @@ describe("product search never leaves the customer with nothing", () => {
     }
   });
 
-  it("offers what the store has when asked for something it doesn't sell", async () => {
+  it("shows no cards when asked for something it doesn't sell, only the categories it has", async () => {
     const { content, list } = await search({ query: "জুতা" });
     expect(content.matched).toBe(false);
-    expect(list?.label).toBe("You might like");
+    expect(list).toBeUndefined();
     expect(content.note).toContain("doesn't have that");
+    expect(content.storeCategories.sort()).toEqual(["Accessories", "Bags"]);
   });
 });

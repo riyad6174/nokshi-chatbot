@@ -99,13 +99,18 @@ export const searchProductsTool: ToolDefinition = {
         }
       }
     }
-    // Nothing matched: never answer with an empty screen. A general question ("what do you have?")
-    // gets a browse selection; a request for something not sold gets what the store does have.
+    // Nothing matched. Only a browsing question ("what do you have?") gets a selection of cards;
+    // anything else gets no cards (the customer didn't ask to see those products), just the store's
+    // categories so the assistant can say what it does sell.
     const matched = products.length > 0;
     const asked = `${input.query ?? ""} ${input.category ?? ""} ${input.brand ?? ""}`.trim();
     const general = !asked || (!translateShoppingTerms(asked) && isGeneralQuery(asked));
-    if (!matched) products = await browseSelection(run, input.limit ?? 6);
-    const categories = [...new Set(products.map((product) => product.category))];
+    let categories = [...new Set(products.map((product) => product.category))];
+    if (!matched) {
+      const selection = await browseSelection(run, input.limit ?? 6);
+      categories = [...new Set(selection.map((product) => product.category))];
+      if (general) products = selection;
+    }
     const facets = matched && products.length > 1 ? computeFacets(products) : [];
 
     const ui: ChatPart[] = [];
@@ -114,9 +119,7 @@ export const searchProductsTool: ToolDefinition = {
         ? input.query || input.category || input.brand
           ? `Results for “${input.query || input.category || input.brand}”`
           : "Products for you"
-        : general
-          ? "Our products"
-          : "You might like";
+        : "Our products";
       ui.push({ type: "product_list", products, label });
     }
     if (facets.length > 0) ui.push({ type: "refine_options", options: { query: input.query ?? input.category ?? "", facets } });
@@ -133,7 +136,7 @@ export const searchProductsTool: ToolDefinition = {
           ? `${cardsNote} Your top pick and why, in a few words.`
           : general
             ? `${cardsNote} These are a selection of the store's products (categories: ${categories.join(", ")}); ask which they like or what they're looking for.`
-            : `Nothing matched "${asked}": say in a few words that the store doesn't have that, then that you've put some other products on screen. ${cardsNote} Don't say other products are unavailable.`,
+            : `Nothing matched "${asked}" and nothing is on screen. Say in a few words that the store doesn't have that, and offer these categories instead: ${categories.join(", ")}. Don't show or search other products unless the customer asks.`,
       },
       ui.length > 0 ? ui : undefined,
     );

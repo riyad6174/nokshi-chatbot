@@ -38,6 +38,8 @@ describe("tool executor", () => {
         "get_recommendations",
         "save_customer_profile",
         "collect_contact_details",
+        "open_product_page",
+        "go_to_checkout",
       ].sort(),
     );
   });

@@ -11,8 +11,7 @@ import { recordTurnOutcome, requestHandoff, wantsHuman } from "@/modules/convers
 import type { SessionContext } from "@/modules/conversations/session.service";
 import { getCartSummary } from "@/modules/cart/cart.service";
 import { runAssistant } from "@/modules/ai/run";
-import { findPhoneNumber } from "@/lib/digits";
-import { upsertProfile } from "@/modules/customers/profile.service";
+import { capturePhoneFromSpeech } from "@/modules/customers/profile.service";
 import type { ChatPart } from "@/types/chat";
 
 export type TurnChannel = "text" | "voice";
@@ -96,13 +95,7 @@ export async function runConversationTurn(input: {
       return;
     }
 
-    // A phone number in what the customer said is saved right away, so it's never lost or re-asked.
-    const phone = findPhoneNumber(userText);
-    if (phone) {
-      await upsertProfile({ storeId: context.storeId, visitorId: context.visitorId }, { phone, preferredLocale: context.locale }).catch(
-        () => undefined,
-      );
-    }
+    await capturePhoneFromSpeech(context, userText);
 
     const cart = await getCartSummary(context.sessionId, context.storeId, context.store.currency);
     const history = await getProviderHistory(conversation.id, 20);
