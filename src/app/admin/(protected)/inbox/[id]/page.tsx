@@ -11,6 +11,7 @@ import { formatMinor } from "@/lib/money";
 import { getCartSummary } from "@/modules/cart/cart.service";
 import { getConversationDetail, toChatMessage } from "@/modules/conversations/conversation.service";
 import { markRead } from "@/modules/conversations/handoff.service";
+import { conversationDigest } from "@/modules/conversations/summary.service";
 import { STATUS_LABELS } from "@/modules/orders/order.service";
 import { getPrimaryStore } from "@/modules/stores/store.service";
 import type { ChatMessage, ChatPart } from "@/types/chat";
@@ -35,6 +36,10 @@ function describePart(part: ChatPart): string | null {
       return "Asked the customer to check their contact details";
     case "order_confirmation":
       return `Order summary to confirm (cash on delivery): ${formatMinor(part.confirmation.totalMinor, part.confirmation.currency)} to ${part.confirmation.customer.name}, ${part.confirmation.customer.phone}`;
+    case "comparison":
+      return `Compared: ${part.products.map((product) => product.name).join(" vs ")}`;
+    case "suggestion_actions":
+      return "(Proactive suggestion)";
     default:
       return null;
   }
@@ -117,9 +122,11 @@ export default async function InboxConversationPage({
   if (!conversation) notFound();
   await markRead(store.id, conversation.id);
 
-  const [cart, orders] = await Promise.all([
+  const [cart, orders, digest] = await Promise.all([
     getCartSummary(conversation.session.id, store.id, store.currency),
     prisma.order.findMany({ where: { storeId: store.id, sessionId: conversation.session.id }, orderBy: { createdAt: "desc" }, take: 5 }),
+    // Lets an agent catch up quickly after a handoff.
+    conversationDigest(conversation.id).catch(() => ""),
   ]);
   const messages = conversation.messages.map(toChatMessage);
   const closed = conversation.status === "closed";
@@ -187,6 +194,16 @@ export default async function InboxConversationPage({
         </section>
 
         <aside className="space-y-3 text-[11.5px]">
+          {digest ? (
+            <div className="rounded-xl border border-stone-200 bg-white p-4">
+              <h2 className="text-[12px] font-semibold text-stone-900">Summary</h2>
+              <ul className="mt-1 space-y-1 text-stone-600">
+                {digest.split("\n").map((line) => (
+                  <li key={line}>{line.replace(/^- /, "")}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <div className="rounded-xl border border-stone-200 bg-white p-4">
             <h2 className="text-[12px] font-semibold text-stone-900">Cart</h2>
             {cart.items.length === 0 ? (

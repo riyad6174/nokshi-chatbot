@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { jsonError, jsonOk } from "@/lib/http";
-import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSessionContext } from "@/modules/conversations/session.service";
 import { trackEvent } from "@/modules/customers/events.service";
 import { createRealtimeSession, RealtimeError, voiceEngine } from "@/modules/realtime/realtime.service";
@@ -15,12 +15,12 @@ export async function POST(request: NextRequest) {
   // Without a forwarded client IP (some proxies drop it) every visitor would share one limit; the
   // per-session limit below still applies.
   const ip = getClientIp(request);
-  const ipRate = ip === "unknown" ? null : checkRateLimit(`realtime:ip:${ip}`, 20, 60_000);
+  const ipRate = ip === "unknown" ? null : await rateLimit(`realtime:ip:${ip}`, 20, 60_000);
   if (ipRate && !ipRate.allowed) return jsonError(429, "rate_limited", "Too many voice calls. Please wait a moment.");
 
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return jsonError(401, "session_required", "Start a chat session first.");
-  const sessionRate = checkRateLimit(`realtime:session:${sessionId}`, 6, 60_000);
+  const sessionRate = await rateLimit(`realtime:session:${sessionId}`, 6, 60_000);
   if (!sessionRate.allowed) return jsonError(429, "rate_limited", "Too many voice calls. Please wait a moment.");
 
   const context = await getSessionContext(sessionId);

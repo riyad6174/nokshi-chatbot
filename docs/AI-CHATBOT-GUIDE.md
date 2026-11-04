@@ -11,7 +11,7 @@ Nokshi is a **Next.js 15 storefront with a built-in AI sales assistant**, aimed 
 The assistant is **an application around a language model, not a model trained on the store's data**. On every turn the server:
 
 1. builds a system prompt from fixed rules, store settings, the live cart, saved customer details, and the next order step;
-2. sends that prompt, the recent chat history, and 18 tool definitions to the configured model;
+2. sends that prompt, the recent chat history, and 19 tool definitions to the configured model;
 3. runs any tool the model asks for (search products, add to cart, propose an order, …) against MongoDB, after validating the arguments;
 4. streams the model's short reply and the tools' cards (products, cart, order summary) to the widget.
 
@@ -101,7 +101,7 @@ The response is a server-sent event (SSE) stream with these events: `message.sta
 10. **Current cart**, calculated by the server.
 11. **This turn**: the language to reply in, and a computed **next order step**. For example: "cart empty → help choose, call `add_to_cart` when they want something"; "cart has items, phone missing → ask only for that"; "summary on screen → call `confirm_order` if they agree". This keeps the model moving toward an order without looping or skipping steps.
 
-## The 18 tools
+## The 19 tools
 
 Defined in `src/modules/ai/tools/` and registered in `src/modules/ai/tools/index.ts`. Each tool has a JSON schema (sent to the model) and a Zod schema (checked before execution). Invalid JSON, failed validation, unknown tools, and exceptions come back to the model as structured errors (`invalid_arguments`, `unknown_tool`, `tool_failed`); they are never shown to the customer as a crash.
 
@@ -109,7 +109,8 @@ Defined in `src/modules/ai/tools/` and registered in `src/modules/ai/tools/index
 |---|---|
 | `search_products` | Searches active products by text, category, brand, attribute/variant filters, and price range; returns product cards and facets for filter chips. Bangla shopping words are mapped to English catalog terms (`ঘড়ি` → watch). A "what do you have?" query returns a browse selection with one product per category first. |
 | `get_product_details` | Full details for one product. |
-| `get_recommendations` | `similar`, `cheaper`, or `complementary` products, from the catalog only. Complementary items use the store's category map. |
+| `get_recommendations` | `similar`, `cheaper`, `complementary`, `complete_the_look`, `compatible`, `recipe`, `bundle` or `personalized` products, from the catalog only, each with a catalog-based `reason`. Uses the store's sales configuration (relationships, recipes, colour pairings, compatibility attributes) and its add-on limits. |
+| `compare_products` | Side-by-side catalog facts for 2–4 products (comparison card). |
 | `search_knowledge` | Keyword search over the store's **ready** knowledge documents (policies, FAQs). |
 | `get_cart` | Current cart. |
 | `add_to_cart` | Adds a product or variant by ID or by name as shown. The server checks store ownership, variant, stock, and quantity limits. |
@@ -145,7 +146,7 @@ Code: `src/modules/ai/config.ts`, `presets.ts`, `provider.ts`, `anthropic.provid
 
 **Anthropic adapter.** It uses the beta Messages streaming API with `max_tokens` 64,000, thinking left at the model's default, and an **effort** level (low / medium / high / xhigh / max, default medium) chosen in the dashboard. It sends no temperature. The model's original content blocks (thinking, text, tool use) are replayed unchanged on the next loop iteration, and parallel tool results are grouped into one message. On supported models (`claude-opus-5-5`, `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5-5`) called without a custom base URL, server-side refusal fallback is turned on. If a reply hits `max_tokens` in the middle of a tool call, the tool is not run. The SDK retries 408/409/429/5xx errors and connection failures twice. Timeout: 120 s.
 
-**Prompt caching (Anthropic).** The system prompt is sent as two text blocks, with a `cache_control` breakpoint on the fixed one. Tools are sent before the system prompt, so the 18 tool definitions and the fixed rules form one cached prefix, reused across tool rounds, turns, and chats of the same store. Cache reads cost a fraction of normal input and shorten the wait for the first word. Changing `tool_choice` for the final round doesn't break the cache. To check it's working, look for `cache_read_input_tokens` above zero in the API usage. If it stays at zero, something per-session or per-turn has crept into the fixed part.
+**Prompt caching (Anthropic).** The system prompt is sent as two text blocks, with a `cache_control` breakpoint on the fixed one. Tools are sent before the system prompt, so the 19 tool definitions and the fixed rules form one cached prefix, reused across tool rounds, turns, and chats of the same store. Cache reads cost a fraction of normal input and shorten the wait for the first word. Changing `tool_choice` for the final round doesn't break the cache. To check it's working, look for `cache_read_input_tokens` above zero in the API usage. If it stays at zero, something per-session or per-turn has crept into the fixed part.
 
 **OpenAI-compatible adapter.** It posts to `{baseUrl}/chat/completions` with `stream: true`, `tool_choice` (`auto`, or `none` for the final round), and temperature 0.2, and reassembles streamed tool-call fragments. Before any of the reply has streamed, it retries 408/409/429/5xx responses and dropped connections up to 2 times. It honors `Retry-After` (capped at 8 s) and otherwise waits about 0.5 s, then 1 s. The 45 s timeout covers all attempts.
 
@@ -156,7 +157,7 @@ Code: `src/modules/ai/config.ts`, `presets.ts`, `provider.ts`, `anthropic.provid
 Voice is turned on per store (**Configure chatbot → Chat box**) and has two engines, selected by `voiceEngine()` in `src/modules/realtime/realtime.service.ts`:
 
 **Realtime** (`VOICE_ENGINE=realtime`, the default). It is used only when the store's AI connection is OpenAI at `api.openai.com` with a key; otherwise the widget automatically falls back to cascade.
-- The server mints a 10-minute client secret (`/api/widget/voice/realtime/session`). The store's key never reaches the browser. The secret carries the full system prompt plus live-call rules ("sound like a real person", spoken Bangladeshi Bangla, a style from `REALTIME_VOICE_STYLE`) and the same 18 tool schemas.
+- The server mints a 10-minute client secret (`/api/widget/voice/realtime/session`). The store's key never reaches the browser. The secret carries the full system prompt plus live-call rules ("sound like a real person", spoken Bangladeshi Bangla, a style from `REALTIME_VOICE_STYLE`) and the same 19 tool schemas.
 - The browser talks to OpenAI over WebRTC, using semantic voice-activity detection with interruption, near-field noise reduction, and `gpt-4o-mini-transcribe` transcripts.
 - Every tool call is sent to `/api/widget/voice/realtime/tool` and runs on the server through the same `executeTool` as text chat. When the cart or order changes, refreshed instructions (with the new next order step) are returned to the session.
 - Both sides of the conversation are saved through `/api/widget/voice/realtime/transcript`, so the Inbox, the reminders, and the AI's memory see voice like text. Cards shown during a spoken reply are attached to that reply. They are held in server memory for up to 5 minutes, so on a restart the reply is saved as text only.
@@ -197,7 +198,7 @@ Each action posts an event message that the customer sees in the chat. The Inbox
 
 - **Customer profiles** (`src/modules/customers/profile.service.ts`) are kept per store and visitor. They hold name, phone, address, city, delivery area, interests, preferences, order history, and marketing consent. Consent is stored with the exact question asked, the customer's reply as evidence, the channels, and a timestamp. Profiles are listed under **Admin → Customers** and can be exported as CSV (`/admin/customers/export`).
 - **Events** (`src/modules/customers/events.service.ts`): `viewed_product`, `added_to_cart`, `removed_from_cart`, `checkout_started`, `order_placed`, `abandoned_cart`, `voice_turn`. They are best effort: a failure is logged and never breaks a customer action. The dashboard **Overview** shows 30-day totals: voice sessions, orders and revenue, orders and revenue from voice sessions, abandoned carts, and marketing opt-ins.
-- **Abandoned carts**: `GET /api/cron/abandoned-carts` (with `Authorization: Bearer $CRON_SECRET`) flags carts with items that haven't changed for 2 hours, once per cart. It only records the event; no message is sent to the customer yet.
+- **Abandoned carts**: `GET /api/cron/abandoned-carts` (with `Authorization: Bearer $CRON_SECRET`) flags carts with items that haven't changed for 2 hours, once per cart. It records the event and, for stores with an active abandoned-cart campaign, queues a consent-checked reminder (see SALES-ENGAGEMENT.md).
 
 ## Where the assistant's knowledge comes from ("training")
 
@@ -242,7 +243,7 @@ The model sees a bounded recent transcript (20 messages) plus summaries of the c
 
 - **The model is never the authority.** Prices, totals, stock, and order state are computed by services and the database; the model only requests actions through validated tools. The prompt tells it to treat customer text, file names, and documents as data, never as instructions.
 - **Ownership checks.** Every widget request is tied to a signed session cookie. Conversations, carts, uploads, and orders are checked against the session and store, and orders outside the current chat need the order number plus phone.
-- **Rate limits** (in memory, per server instance):
+- **Rate limits** (shared across instances in MongoDB when `RATE_LIMIT_BACKEND=mongo`, the production default; in memory otherwise):
 
   | Endpoint | Limit |
   |---|---|
@@ -254,10 +255,10 @@ The model sees a bounded recent transcript (20 messages) plus summaries of the c
   | Realtime session | 20/min per IP, 6/min per session |
   | Admin login | 10 per 5 min per IP |
 
-  If you run several instances, add edge or shared-store rate limiting.
+  The proactive-engagement endpoint allows 30 events/min per session; the agent message stream 12 connections/min per session.
 - **Secrets.** AI keys stored in the dashboard are encrypted with `AUTH_SECRET`. Realtime voice uses short-lived browser tokens. Cron endpoints require `CRON_SECRET` (16+ characters), compared in constant time.
 - **Third-party data flow.** When live AI or a remote speech provider is configured, the conversation context described above is sent to that provider. This includes saved customer details and the cart. Choose providers that meet the store's privacy requirements.
-- **Images aren't analyzed.** Attached images and PDFs are shown to agents in the Inbox, but the model sees only a note with the file name, not the file's content.
+- **Attachments.** When the store allows it, images and PDFs attached to the current message are sent to the model (after ownership, size and file-signature checks), framed as untrusted customer data. Earlier attachments stay as notes with the file name.
 
 ## Configuration reference (environment)
 
@@ -290,11 +291,14 @@ See `.env.example` for defaults and comments. Main variables:
 ## Known limitations
 
 - Payment is cash on delivery only; online payment gateways are not connected.
-- Agent replies reach the widget by polling, not push.
-- Rate limits and realtime card buffering are in memory, per server instance.
-- Knowledge and product search are keyword-based, not semantic.
-- The model can't see the content of images, PDFs, or untranscribed voice notes.
-- Abandoned carts are flagged, but no reminder message is sent yet.
+- Realtime voice card buffering is in memory, per server instance.
+- The model can't hear untranscribed voice notes; PDFs reach the model only with Claude or OpenAI's own API.
+
+The AI Sales & Engagement engine, proactive engagement, shared rate limiting, durable jobs, semantic
+search, image/PDF understanding, marketing automation and the Analytics page are described in
+[SALES-ENGAGEMENT.md](SALES-ENGAGEMENT.md). Several limitations listed in earlier versions of this
+guide (polling only, in-memory rate limits, keyword-only search, unread attachments, no cart
+reminders) are resolved there.
 
 ## Main implementation areas
 

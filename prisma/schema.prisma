@@ -40,6 +40,10 @@ model Store {
   uploads       Upload[]
   customers     CustomerProfile[]
   events        CustomerEvent[]
+  jobs          Job[]
+  aiTurns       AiTurnLog[]
+  campaigns     MarketingCampaign[]
+  marketingMessages MarketingMessage[]
 
   @@index([websiteDomain])
 }
@@ -77,6 +81,9 @@ model ChatbotSettings {
   salesPlaybookEnabled  Boolean?
   // Complementary categories for cross-selling, e.g. {"Backpacks":["Water bottles","Rain covers"]}
   recommendationMap     String?
+  // AI Sales & Engagement configuration (JSON, validated by src/modules/sales/config.ts). Empty uses the
+  // "general" industry preset, so existing stores keep their current behaviour.
+  salesConfig           String?
   attachmentsEnabled Boolean  @default(true)
   enabledFeatures    String   @default("[\"product_cards\",\"cart_tools\",\"knowledge_search\",\"orders\"]")
   widgetTheme        String   @default("{}")
@@ -133,6 +140,9 @@ model Product {
   currency          String
   status            String   @default("active")
   attributes        String   @default("{}")
+  // Semantic search (optional): vector of the product text and a hash of the text it was made from.
+  embedding         Float[]
+  embeddingHash     String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -177,6 +187,8 @@ model KnowledgeDocument {
   sourceReference String?
   status          String   @default("ready")
   contentHash     String
+  embedding       Float[]
+  embeddingHash   String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -193,6 +205,8 @@ model ChatSession {
   locale         String
   createdAt      DateTime @default(now())
   lastActivityAt DateTime @default(now())
+  // Sales/engagement state for this visit (JSON): suggestions shown, dismissed, opt-out, limits.
+  engagement     String?
 
   store         Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
   conversations Conversation[]
@@ -432,6 +446,10 @@ model CustomerProfile {
   budgetHint       String            @default("")
   visitorIds       String[]
   marketingConsent MarketingConsent?
+  // Set when the customer unsubscribed from marketing (consent is withdrawn at the same time).
+  unsubscribedAt   DateTime?
+  // The customer asked the assistant to stop proactive suggestions.
+  proactiveOptOut  Boolean?
   orderCount       Int               @default(0)
   totalSpentMinor  Int               @default(0)
   lastOrderAt      DateTime?
@@ -440,8 +458,9 @@ model CustomerProfile {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
-  store  Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  events CustomerEvent[]
+  store    Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  events   CustomerEvent[]
+  messages MarketingMessage[]
 
   @@index([storeId, lastSeenAt])
   @@index([storeId, phoneKey])
@@ -456,6 +475,8 @@ model CustomerEvent {
   visitorId  String
   profileId  String?          @db.ObjectId
   // viewed_product | added_to_cart | removed_from_cart | checkout_started | order_placed | abandoned_cart | voice_turn
+  // | searched | compared | recommendation_shown | recommendation_clicked | proactive_shown | proactive_dismissed
+  // | proactive_opt_out | marketing_sent | marketing_clicked | cart_recovered
   type       String
   productId  String?
   cartId     String?
@@ -470,4 +491,121 @@ model CustomerEvent {
   @@index([storeId, type, at])
   @@index([storeId, visitorId, at])
   @@index([cartId, type])
+}
+
+/// Durable background work (reminders, campaigns, embeddings). Claimed atomically by
+/// src/modules/jobs/job.service.ts, so several app instances can run the queue at once.
+model Job {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  storeId     String?   @db.ObjectId
+  type        String
+  payload     String    @default("{}")
+  // queued | running | done | failed | cancelled
+  status      String    @default("queued")
+  runAt       DateTime  @default(now())
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  lockedUntil DateTime?
+  lockedBy    String    @default("")
+  lastError   String    @default("")
+  // Same type + key is enqueued once (e.g. one reminder per cart). Always set: unique indexes treat nulls as equal.
+  dedupeKey   String
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([type, dedupeKey])
+  @@index([status, runAt])
+  @@index([storeId, type, status])
+}
+
+type AiToolCallLog {
+  name String
+  ok   Boolean
+  code String  @default("")
+  ms   Int     @default(0)
+}
+
+/// One assistant turn, for reliability and quality reporting (success rate, latency, tool errors).
+model AiTurnLog {
+  id             String          @id @default(auto()) @map("_id") @db.ObjectId
+  storeId        String          @db.ObjectId
+  conversationId String          @db.ObjectId
+  sessionId      String          @db.ObjectId
+  // text | voice
+  channel        String
+  // live | demo
+  mode           String
+  model          String          @default("")
+  // answered | missed | error | handoff
+  outcome        String
+  latencyMs      Int
+  firstTokenMs   Int?
+  toolCalls      AiToolCallLog[]
+  toolErrorCount Int             @default(0)
+  // The customer's question, truncated (for "unanswered questions" reporting).
+  userText       String          @default("")
+  intent         String          @default("")
+  at             DateTime        @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, at])
+  @@index([storeId, outcome, at])
+}
+
+/// Consent-aware marketing. Kept apart from transactional order messages.
+model MarketingCampaign {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  storeId      String    @db.ObjectId
+  name         String
+  // abandoned_cart | product_followup | broadcast
+  kind         String
+  // email | sms | whatsapp
+  channel      String
+  // Segment rules (JSON, see src/modules/marketing/segments.ts).
+  segment      String    @default("{}")
+  subject      String    @default("")
+  body         String
+  // Abandoned-cart automation: wait this long after the cart was flagged.
+  delayMinutes Int       @default(60)
+  // draft | active | paused | completed
+  status       String    @default("draft")
+  launchedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  store    Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  messages MarketingMessage[]
+
+  @@index([storeId, kind, status])
+}
+
+model MarketingMessage {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  storeId    String    @db.ObjectId
+  campaignId String    @db.ObjectId
+  profileId  String    @db.ObjectId
+  channel    String
+  recipient  String
+  // queued | sent | skipped | failed
+  status     String    @default("queued")
+  reason     String    @default("")
+  // One message per campaign, customer and occasion (e.g. the abandoned cart id).
+  dedupeKey  String
+  cartId     String?
+  subject    String    @default("")
+  body       String    @default("")
+  sentAt     DateTime?
+  clickedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  store    Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  campaign MarketingCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  profile  CustomerProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, profileId, dedupeKey])
+  @@index([storeId, status, createdAt])
 }

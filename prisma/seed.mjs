@@ -141,6 +141,135 @@ const products = [
       { sku: "MWW-BLK", title: "Black / Black leather", options: { case: "Black", strap: "Black leather" }, externalVariantId: "gid_mww_blk", stockQuantity: 0, stockStatus: "out_of_stock" },
     ],
   },
+  {
+    externalProductId: "ext_jms_008",
+    slug: "jamdani-saree",
+    brand: "Tangail Weaves",
+    name: "Jamdani Saree",
+    category: "Clothing",
+    priceMinor: 650000,
+    imageUrl: "/products/saree.svg",
+    description:
+      "A handwoven half-silk jamdani saree with a zari-touched border and a 6-yard drape, plus an unstitched blouse piece. Ideal for weddings and Eid. হাতে বোনা হাফসিল্ক জামদানি শাড়ি, ব্লাউজ পিসসহ।",
+    attributes: { fabric: "Half silk", length: "6 yards + blouse piece", origin: "Narayanganj, Bangladesh", care: "Dry clean only" },
+    variants: [
+      { sku: "JMS-RED", title: "Crimson / Gold", options: { color: "Crimson" }, externalVariantId: "gid_jms_red", stockQuantity: 4 },
+      { sku: "JMS-TEA", title: "Teal / Silver", options: { color: "Teal" }, externalVariantId: "gid_jms_tea", stockQuantity: 2 },
+    ],
+  },
+  {
+    externalProductId: "ext_nkc_009",
+    slug: "nakshi-kantha-cushion-cover",
+    brand: "Mati Home",
+    name: "Nakshi Kantha Cushion Cover (Set of 2)",
+    category: "Home",
+    priceMinor: 85000,
+    imageUrl: "/products/cushion.svg",
+    description:
+      "Two 16x16 inch cotton cushion covers with hand-stitched nakshi kantha embroidery and a hidden zip. Inserts not included. হাতে সেলাই করা নকশি কাঁথার কুশন কভার, দুইটির সেট।",
+    attributes: { size: "16 x 16 inches", fabric: "Cotton", pieces: "2", care: "Hand wash cold, dry in shade" },
+    variants: [
+      { sku: "NKC-RED", title: "Red on cream", options: { color: "Red on cream" }, externalVariantId: "gid_nkc_red", stockQuantity: 20 },
+      { sku: "NKC-BLU", title: "Blue on cream", options: { color: "Blue on cream" }, externalVariantId: "gid_nkc_blu", stockQuantity: 13 },
+    ],
+  },
+  {
+    externalProductId: "ext_jmb_010",
+    slug: "jute-market-bag",
+    brand: "Nokshi Basics",
+    name: "Jute Market Bag",
+    category: "Bags",
+    priceMinor: 65000,
+    imageUrl: "/products/jute.svg",
+    description:
+      "A plastic-free jute shopping bag with cotton-lined handles that carries up to 10 kg. Folds flat. প্লাস্টিকমুক্ত পাটের বাজারের ব্যাগ, ১০ কেজি পর্যন্ত বহন করে।",
+    attributes: { material: "Natural jute", capacity: "Up to 10 kg", care: "Spot clean only" },
+    variants: [{ sku: "JMB-NAT", title: "Natural", options: { color: "Natural" }, externalVariantId: "gid_jmb_nat", stockQuantity: 40 }],
+  },
+  {
+    externalProductId: "ext_lsd_011",
+    slug: "leather-sandals",
+    brand: "Chorui Footwear",
+    name: "Leather Sandals",
+    category: "Footwear",
+    priceMinor: 220000,
+    imageUrl: "/products/sandals.svg",
+    description:
+      "Handcrafted cow-leather sandals with a cushioned footbed and an anti-slip rubber sole. Pairs well with panjabi or casual wear. আরামদায়ক চামড়ার স্যান্ডেল, পাঞ্জাবির সাথে মানানসই।",
+    attributes: { material: "Genuine cow leather", sole: "Anti-slip rubber", sizes: "40-44" },
+    variants: [
+      { sku: "LSD-40", title: "Size 40", options: { size: "40" }, externalVariantId: "gid_lsd_40", stockQuantity: 5 },
+      { sku: "LSD-41", title: "Size 41", options: { size: "41" }, externalVariantId: "gid_lsd_41", stockQuantity: 9 },
+      { sku: "LSD-42", title: "Size 42", options: { size: "42" }, externalVariantId: "gid_lsd_42", stockQuantity: 7 },
+      { sku: "LSD-43", title: "Size 43", options: { size: "43" }, externalVariantId: "gid_lsd_43", stockQuantity: 3 },
+      { sku: "LSD-44", title: "Size 44", options: { size: "44" }, externalVariantId: "gid_lsd_44", stockQuantity: 0, stockStatus: "out_of_stock" },
+    ],
+  },
+  {
+    externalProductId: "ext_pwb_012",
+    slug: "power-bank-20000mah",
+    brand: "SoundCraft",
+    name: "Power Bank 20000mAh",
+    category: "Electronics",
+    priceMinor: 280000,
+    imageUrl: "/products/powerbank.svg",
+    description:
+      "A 20000mAh power bank with 22.5W fast charging, USB-C in/out, and two USB-A ports. Charges a phone about 4 times. Includes a 6-month warranty. ২০০০০ এমএএইচ ফাস্ট চার্জিং পাওয়ার ব্যাংক।",
+    attributes: { capacity: "20000mAh", output: "22.5W fast charge", ports: "1x USB-C, 2x USB-A", warranty: "6 months" },
+    variants: [
+      { sku: "PWB-BLK", title: "Black", options: { color: "Black" }, externalVariantId: "gid_pwb_blk", stockQuantity: 18 },
+      { sku: "PWB-WHT", title: "White", options: { color: "White" }, externalVariantId: "gid_pwb_wht", stockQuantity: 7 },
+    ],
+  },
+  {
+    externalProductId: "ext_sfb_013",
+    slug: "smart-fitness-band",
+    brand: "Horizon",
+    name: "Smart Fitness Band",
+    category: "Electronics",
+    priceMinor: 350000,
+    imageUrl: "/products/fitnessband.svg",
+    description:
+      "A fitness band with an AMOLED display, heart-rate and SpO2 tracking, sleep tracking, call and message alerts, and up to 10 days of battery. Works with Android and iPhone. হার্ট রেট ও ঘুম ট্র্যাক করার স্মার্ট ব্যান্ড, ১০ দিন ব্যাটারি।",
+    attributes: { display: "1.1 inch AMOLED", battery: "Up to 10 days", waterResistance: "5 ATM", warranty: "1 year" },
+    variants: [
+      { sku: "SFB-BLK", title: "Midnight", options: { color: "Midnight" }, externalVariantId: "gid_sfb_blk", stockQuantity: 11 },
+      { sku: "SFB-PNK", title: "Rose", options: { color: "Rose" }, externalVariantId: "gid_sfb_pnk", stockQuantity: 6 },
+    ],
+  },
+  {
+    externalProductId: "ext_ckt_014",
+    slug: "cotton-kurti",
+    brand: "Nokshi Heritage",
+    name: "Cotton Kurti",
+    category: "Clothing",
+    priceMinor: 190000,
+    imageUrl: "/products/kurti.svg",
+    description:
+      "A block-printed cotton kurti with three-quarter sleeves and side slits, made for everyday comfort in the heat. Machine washable. হাতে ব্লক প্রিন্ট করা সুতির কুর্তি।",
+    attributes: { fabric: "100% cotton", fit: "Straight", length: "44 inches", care: "Machine wash cold inside out", sizes: "S, M, L" },
+    variants: [
+      { sku: "CKT-S", title: "Small", options: { size: "S" }, externalVariantId: "gid_ckt_s", stockQuantity: 10 },
+      { sku: "CKT-M", title: "Medium", options: { size: "M" }, externalVariantId: "gid_ckt_m", stockQuantity: 15 },
+      { sku: "CKT-L", title: "Large", options: { size: "L" }, externalVariantId: "gid_ckt_l", stockQuantity: 8 },
+    ],
+  },
+  {
+    externalProductId: "ext_ttp_015",
+    slug: "terracotta-planter",
+    brand: "Mati Home",
+    name: "Terracotta Planter",
+    category: "Home",
+    priceMinor: 70000,
+    imageUrl: "/products/planter.svg",
+    description:
+      "A hand-thrown 8-inch terracotta planter with a drainage hole and a matching saucer. Plant not included. হাতে তৈরি পোড়ামাটির টব, প্লেটসহ।",
+    attributes: { diameter: "8 inches", material: "Terracotta", drainage: "Yes, with saucer" },
+    variants: [
+      { sku: "TTP-08", title: "8 inch", options: { size: "8 inch" }, externalVariantId: "gid_ttp_08", stockQuantity: 22 },
+      { sku: "TTP-12", title: "12 inch", options: { size: "12 inch" }, externalVariantId: "gid_ttp_12", priceOverrideMinor: 110000, stockQuantity: 9 },
+    ],
+  },
 ];
 
 const knowledge = [
@@ -163,6 +292,14 @@ const knowledge = [
   {
     title: "Warranty & Support",
     content: `Wireless Earbuds Pro carry a 6-month warranty covering manufacturing defects in the battery and charging case. The Minimalist Wrist Watch carries a 1-year warranty covering the movement. Warranty does not cover physical damage, water damage beyond the stated rating, or normal wear. To claim warranty, contact support with your order number and a short video showing the issue. Our support hours are Saturday to Thursday, 10 AM to 7 PM Bangladesh time. For order-specific help, contact support@nokshibazaar.example.`,
+  },
+  {
+    title: "Size Guide",
+    content: `Cotton Panjabi (chest / length in inches): M 40 / 40, L 42 / 42, XL 44 / 43. Cotton Kurti (bust / length in inches): S 36 / 44, M 38 / 44, L 40 / 45. If you are between sizes, choose the larger size for a relaxed fit. Leather Sandals use EU sizing: 40 fits a 25.5 cm foot, 41 fits 26 cm, 42 fits 26.5 cm, 43 fits 27.5 cm, 44 fits 28 cm. Measure your foot in the evening and choose the size up if you are in between. Size exchanges are free within 7 days if the item is unused.`,
+  },
+  {
+    title: "Gift Wrapping & Bulk Orders",
+    content: `Gift wrapping with a handwritten card is available for BDT 100 per item; mention it in the order notes. We never include prices inside gift parcels. For corporate gifts or bulk orders of 20 or more pieces, we offer up to 12% discount and custom packaging; contact support@nokshibazaar.example with the product, quantity, and delivery date. Bulk orders need 7-10 business days to prepare.`,
   },
 ];
 
@@ -277,6 +414,7 @@ async function main() {
           title: variant.title,
           options: JSON.stringify(variant.options),
           externalVariantId: variant.externalVariantId,
+          priceOverrideMinor: variant.priceOverrideMinor ?? null,
           stockStatus: variant.stockStatus || "in_stock",
           stockQuantity: variant.stockQuantity,
           storeId: store.id,
@@ -288,6 +426,7 @@ async function main() {
           title: variant.title,
           options: JSON.stringify(variant.options),
           externalVariantId: variant.externalVariantId,
+          priceOverrideMinor: variant.priceOverrideMinor ?? null,
           stockStatus: variant.stockStatus || "in_stock",
           stockQuantity: variant.stockQuantity,
         },

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="Nakshi Kantha Cushion Cover illustration">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#efe6d6"/>
+      <stop offset="1" stop-color="#d9c8a8"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <circle cx="170" cy="170" r="120" fill="#ffffff" opacity="0.35"/>
+  <ellipse cx="400" cy="690" rx="235" ry="32" fill="#000000" opacity="0.12"/>
+  <rect x="200" y="230" width="400" height="400" rx="40" fill="#f4ecdd" stroke="#c2452d" stroke-width="10"/>
+  <g fill="none" stroke="#c2452d" stroke-width="6" stroke-dasharray="12 10"><rect x="240" y="270" width="320" height="320" rx="24"/><circle cx="400" cy="430" r="90"/></g>
+  <path d="M400 360l20 50 50 20-50 20-20 50-20-50-50-20 50-20Z" fill="#2f6f8f"/>
+</svg>

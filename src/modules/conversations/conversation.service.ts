@@ -140,6 +140,10 @@ function describeShownParts(structuredContent: string | null): string {
       lines.push(`- Cart: ${part.cart.items.map((item) => `${item.quantity}x ${item.name}${item.variantTitle ? ` (${item.variantTitle})` : ""}`).join(", ") || "empty"}`);
     } else if (part.type === "order_confirmation") {
       lines.push("- Order summary card (waiting for the customer's confirmation)");
+    } else if (part.type === "comparison") {
+      lines.push(`- Comparison of: ${part.products.map((product) => `${product.name} productId=${product.id}`).join("; ")}`);
+    } else if (part.type === "suggestion_actions") {
+      lines.push("- (This was a proactive suggestion the assistant sent on its own, not an answer to a question.)");
     }
   }
   return lines.length > 0 ? `[On screen with this reply:\n${lines.join("\n")}]` : "";

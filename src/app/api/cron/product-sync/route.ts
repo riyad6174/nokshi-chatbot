@@ -1,6 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk } from "@/lib/http";
+import { isAuthorizedCron } from "@/lib/auth/cron";
 import { prisma } from "@/lib/db/prisma";
 import { isSyncDue, syncProductSource } from "@/modules/catalog/product-sync.service";
 
@@ -11,13 +11,7 @@ export const maxDuration = 300;
 // For a scheduler (e.g. Vercel Cron): GET /api/cron/product-sync with "Authorization: Bearer $CRON_SECRET".
 // Runs every store whose API product source is due.
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET ?? "";
-  const provided = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  const ok =
-    secret.length >= 16 &&
-    provided.length === secret.length &&
-    timingSafeEqual(Buffer.from(provided), Buffer.from(secret));
-  if (!ok) return jsonError(401, "unauthorized", "Missing or invalid cron secret.");
+  if (!isAuthorizedCron(request)) return jsonError(401, "unauthorized", "Missing or invalid cron secret.");
 
   const sources = await prisma.productSource.findMany({ where: { mode: "api", autoSync: true } });
   const results: Array<{ storeId: string; ok: boolean; error?: string }> = [];

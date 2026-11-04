@@ -86,6 +86,22 @@ export function toAnthropicMessages(messages: ProviderMessage[]): {
       continue;
     }
 
+    if (Array.isArray(message.content)) {
+      output.push({
+        role: "user",
+        content: message.content.map((part): Anthropic.Beta.BetaContentBlockParam =>
+          part.type === "text"
+            ? { type: "text", text: part.text }
+            : part.type === "image"
+              ? {
+                  type: "image",
+                  source: { type: "base64", media_type: part.mime as "image/jpeg" | "image/png" | "image/gif" | "image/webp", data: part.data },
+                }
+              : { type: "document", source: { type: "base64", media_type: "application/pdf", data: part.data } },
+        ),
+      });
+      continue;
+    }
     output.push({ role: "user", content: message.content });
   }
 

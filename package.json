@@ -12,6 +12,7 @@
     "db:local": "node scripts/dev-mongo.mjs",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
+    "db:seed:demo": "node --env-file-if-exists=.env prisma/seed-demo.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"

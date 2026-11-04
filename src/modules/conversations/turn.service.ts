@@ -10,8 +10,15 @@ import {
 import { recordTurnOutcome, requestHandoff, wantsHuman } from "@/modules/conversations/handoff.service";
 import type { SessionContext } from "@/modules/conversations/session.service";
 import { getCartSummary } from "@/modules/cart/cart.service";
-import { runAssistant } from "@/modules/ai/run";
+import { isLiveAiEnabled, runAssistant } from "@/modules/ai/run";
+import { resolveAiConfig } from "@/modules/ai/config";
+import type { ToolLogEntry } from "@/modules/ai/orchestrator";
+import { recordAiTurn } from "@/modules/analytics/turn-log.service";
+import { summarizeEarlierMessages } from "@/modules/conversations/summary.service";
 import { capturePhoneFromSpeech } from "@/modules/customers/profile.service";
+import { trackEvent } from "@/modules/customers/events.service";
+import { detectShoppingIntent } from "@/modules/sales/intent";
+import { getEngagementState, isOptedOut, setSuggestionOptOut } from "@/modules/sales/state";
 import type { ChatPart } from "@/types/chat";
 
 export type TurnChannel = "text" | "voice";
@@ -42,6 +49,9 @@ export async function runConversationTurn(input: {
     handoffEnabled: settings?.handoffEnabled !== false,
     handoffAfterMisses: settings?.handoffAfterMisses ?? 2,
   };
+
+  // Reliability record of this turn (written once it ends, whatever the outcome).
+  let turnLog: (Omit<Parameters<typeof recordAiTurn>[0], "outcome" | "latencyMs"> & { started: number }) | null = null;
 
   // What the assistant said and showed so far, so a reply the customer talks over is still remembered.
   let partialText = "";
@@ -98,9 +108,37 @@ export async function runConversationTurn(input: {
     await capturePhoneFromSpeech(context, userText);
 
     const cart = await getCartSummary(context.sessionId, context.storeId, context.store.currency);
-    const history = await getProviderHistory(conversation.id, 20);
+    const [history, conversationSummary] = await Promise.all([
+      getProviderHistory(conversation.id, 20),
+      summarizeEarlierMessages(conversation.id, 20).catch(() => ""),
+    ]);
     const turnStarted = new Date();
+    const intent = detectShoppingIntent({ text: userText, cartItemCount: cart.itemCount });
+    // "Stop suggesting things" / "show me suggestions again": remembered for this visitor.
+    if (intent.optOut || intent.wantsSuggestions) {
+      const state = await getEngagementState(context.sessionId).catch(() => null);
+      const optedOut = state ? await isOptedOut({ storeId: context.storeId, visitorId: context.visitorId, state }) : false;
+      if (state && optedOut !== intent.optOut) {
+        await setSuggestionOptOut({ storeId: context.storeId, sessionId: context.sessionId, visitorId: context.visitorId, optOut: intent.optOut });
+        if (intent.optOut) {
+          await trackEvent({ storeId: context.storeId, sessionId: context.sessionId, visitorId: context.visitorId, type: "proactive_opt_out", meta: { via: "chat" } });
+        }
+      }
+    }
     let missed = false;
+    let firstTokenMs: number | null = null;
+    let toolLog: ToolLogEntry[] = [];
+    turnLog = {
+      storeId: context.storeId,
+      conversationId: conversation.id,
+      sessionId: context.sessionId,
+      channel: input.channel,
+      mode: isLiveAiEnabled(context.store) ? "live" : "demo",
+      model: resolveAiConfig(settings)?.model ?? "",
+      userText,
+      intent: intent.stage,
+      started: turnStarted.getTime(),
+    };
 
     for await (const event of runAssistant({
       session: context,
@@ -109,9 +147,12 @@ export async function runConversationTurn(input: {
       userText,
       channel: input.channel,
       signal: input.signal,
+      conversationSummary,
+      attachments,
     })) {
       if (input.signal.aborted) break;
       if (event.type === "delta") {
+        if (firstTokenMs === null && event.text.trim()) firstTokenMs = Date.now() - turnStarted.getTime();
         partialText += event.text;
         send("message.delta", { text: event.text });
       } else if (event.type === "ui") {
@@ -120,6 +161,7 @@ export async function runConversationTurn(input: {
         if (event.part.type === "cart_summary") send("ui.cart", { cart: event.part.cart });
       } else if (event.type === "done") {
         missed = Boolean(event.missed);
+        toolLog = event.toolLog ?? [];
         persisted = true;
         const stored = await appendMessage({
           conversationId: conversation.id,
@@ -137,12 +179,23 @@ export async function runConversationTurn(input: {
     }
 
     await recordTurnOutcome({ ...handoffOptions, missed });
+    const handedOff = toolLog.some((entry) => entry.name === "request_human" && entry.ok);
+    await recordAiTurn({
+      ...turnLog,
+      outcome: handedOff ? "handoff" : missed ? "missed" : "answered",
+      latencyMs: Date.now() - turnLog.started,
+      firstTokenMs,
+      toolLog,
+    });
     // The request_human tool or the miss counter may have handed the chat off during this turn.
     await sendModeAndEvents(turnStarted);
   } catch (error) {
     if (input.signal.aborted) {
       await persistInterrupted();
       return;
+    }
+    if (turnLog) {
+      await recordAiTurn({ ...turnLog, outcome: "error", latencyMs: Date.now() - turnLog.started });
     }
     logger.error("widget.message_failed", {
       sessionId: context.sessionId,

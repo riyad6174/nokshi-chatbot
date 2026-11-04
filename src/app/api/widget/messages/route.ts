@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { jsonError, jsonOk } from "@/lib/http";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { rateLimit } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db/prisma";
 import {
   conversationMode,
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return jsonError(401, "session_required", "Start a chat session first.");
 
-  const rate = checkRateLimit(`poll:${sessionId}`, 60, 60_000);
+  const rate = await rateLimit(`poll:${sessionId}`, 60, 60_000);
   if (!rate.allowed) return jsonError(429, "rate_limited", "Polling too fast.");
 
   const context = await getSessionContext(sessionId);

@@ -175,6 +175,14 @@ export async function placeOrderFromCheckout(input: PlaceOrderInput): Promise<Or
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const order = await prisma.$transaction(async (tx) => {
+        // Claim the checkout first, conditionally: of two simultaneous submits (double tap, two tabs,
+        // a retried request) only one transaction can move it out of "prepared".
+        const claimed = await tx.checkoutSession.updateMany({
+          where: { id: checkout.id, status: "prepared" },
+          data: { status: "completed", completedAt: now },
+        });
+        if (claimed.count === 0) throw new OrderError("checkout_closed", "This checkout is no longer open.");
+
         for (const line of lines) {
           if (!line.variantId) continue;
           const variant = byId.get(line.productId)?.variants.find((entry) => entry.id === line.variantId);
@@ -243,17 +251,41 @@ export async function placeOrderFromCheckout(input: PlaceOrderInput): Promise<Or
           orderId: order.id,
           cartId: checkout.cartId,
           valueMinor: order.totalMinor,
+          // Lets analytics attribute purchases to recommendations and searches.
+          meta: { productIds: [...new Set(lines.map((line) => line.productId))] },
         });
       }
       return order;
     } catch (error) {
+      const code = typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined;
+      // A concurrent submit of the same checkout won (we lost the claim, or MongoDB aborted our
+      // transaction on a write conflict): return the order it placed instead of failing or duplicating.
+      const lostRace = code === "P2034" || (error instanceof OrderError && error.code === "checkout_closed");
+      if (lostRace) {
+        const winner = await placedOrderForCheckout(checkout.id, attempt);
+        if (winner) return winner;
+        if (attempt < 2 && code === "P2034") continue;
+        throw error instanceof OrderError ? error : new OrderError("checkout_closed", "This checkout is no longer open.");
+      }
       // Order-number collision: retry with a new number. Everything else propagates.
-      const isCollision =
-        typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
-      if (!isCollision || attempt === 2) throw error;
+      if (code !== "P2002" || attempt === 2) throw error;
     }
   }
   throw new OrderError("order_failed", "The order could not be placed. Please try again.");
+}
+
+/** The order a concurrent submit placed for this checkout, waiting briefly for its commit. */
+async function placedOrderForCheckout(checkoutId: string, attempt: number): Promise<Order | null> {
+  for (let tries = 0; tries < 5; tries += 1) {
+    const current = await prisma.checkoutSession.findUnique({ where: { id: checkoutId }, select: { status: true, orderId: true } });
+    if (current?.orderId) return prisma.order.findUnique({ where: { id: current.orderId } });
+    // Still open (the other transaction is in flight or rolled back): let the caller retry.
+    if (current?.status === "prepared" && attempt < 2) return null;
+    // Expired, failed or gone: nothing was placed for it.
+    if (!current || (current.status !== "prepared" && current.status !== "completed")) return null;
+    await new Promise((resolve) => setTimeout(resolve, 100 * (tries + 1)));
+  }
+  return null;
 }
 
 /** Posts an event in the customer's chat so the conversation (and the AI) knows an order exists. */

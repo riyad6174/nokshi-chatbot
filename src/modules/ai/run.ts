@@ -1,3 +1,4 @@
+import type { MessageAttachment } from "@prisma/client";
 import type { OrchestratorEvent } from "@/modules/ai/orchestrator";
 import { runLiveAssistant, type AssistantHistoryMessage } from "@/modules/ai/orchestrator";
 import { runDemoAssistant } from "@/modules/ai/demo-assistant";
@@ -18,6 +19,8 @@ export function runAssistant(input: {
   userText: string;
   channel?: TurnChannel;
   signal?: AbortSignal;
+  conversationSummary?: string;
+  attachments?: MessageAttachment[];
 }): AsyncGenerator<OrchestratorEvent> {
   const config = resolveAiConfig(input.session.store.settings);
   if (config) {
@@ -28,6 +31,8 @@ export function runAssistant(input: {
       config,
       channel: input.channel ?? "text",
       signal: input.signal,
+      conversationSummary: input.conversationSummary,
+      attachments: input.attachments,
     });
   }
   return runDemoAssistant({

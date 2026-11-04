@@ -114,7 +114,11 @@ export type ChatPart =
       deliveryAreaId: string;
       note: string;
     }
-  | { type: "handoff"; state: "waiting" | "joined" | "released" | "closed"; agentName?: string };
+  | { type: "handoff"; state: "waiting" | "joined" | "released" | "closed"; agentName?: string }
+  /** Side-by-side catalog facts for 2-4 products. */
+  | { type: "comparison"; products: ProductCardData[]; rows: Array<{ label: string; values: string[] }> }
+  /** Buttons under a proactive suggestion: "No thanks" and "Stop suggestions". */
+  | { type: "suggestion_actions"; suggestionId: string; trigger: string };
 
 export type AttachmentData = {
   uploadId: string;
@@ -154,6 +158,12 @@ export type WidgetSettingsPayload = {
   attachmentsEnabled: boolean;
   theme: { accent?: string; position?: "left" | "right" };
   aiMode: "live" | "demo";
+  /** Proactive engagement: which activity to report, and after how many seconds (null = off). */
+  engagement?: {
+    enabled: boolean;
+    triggers: Record<"search" | "product_view" | "compare" | "add_to_cart" | "cart_idle" | "checkout_start", number | null>;
+    nudgeWhenClosed: boolean;
+  };
 };
 
 export type WidgetSessionResponse = {

@@ -36,6 +36,7 @@ describe("tool executor", () => {
         "propose_order",
         "confirm_order",
         "get_recommendations",
+        "compare_products",
         "save_customer_profile",
         "collect_contact_details",
         "open_product_page",

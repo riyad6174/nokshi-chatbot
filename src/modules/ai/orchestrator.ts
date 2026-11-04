@@ -1,10 +1,17 @@
 import { logger } from "@/lib/logging/logger";
 import type { AiConfig } from "@/modules/ai/config";
+import type { MessageAttachment } from "@prisma/client";
+import { prisma } from "@/lib/db/prisma";
 import type { ProviderMessage, ProviderToolCall } from "@/modules/ai/provider";
-import { streamCompletion } from "@/modules/ai/provider";
+import { ProviderError, streamCompletion } from "@/modules/ai/provider";
+import { attachmentUnderstandingEnabled, loadAttachmentParts } from "@/modules/ai/attachments";
+import { resolveSalesConfig, type SalesConfig } from "@/modules/sales/config";
+import { detectShoppingIntent } from "@/modules/sales/intent";
+import { buildSalesTurnContext } from "@/modules/sales/prompt";
+import { getEngagementState, isOptedOut, type EngagementState } from "@/modules/sales/state";
 import { buildSystemPromptParts } from "@/modules/ai/system-instructions";
 import { describeOpenProposal } from "@/modules/orders/voice-order.service";
-import { savedDetailsForVisitor } from "@/modules/customers/profile.service";
+import { findProfileForVisitor, savedDetailsForVisitor } from "@/modules/customers/profile.service";
 import { detectLang } from "@/modules/speech/speech-provider";
 import { executeTool, getProviderTools } from "@/modules/ai/tools";
 import type { ToolContext } from "@/modules/ai/tools/types";
@@ -16,7 +23,10 @@ export type OrchestratorEvent =
   | { type: "delta"; text: string }
   | { type: "ui"; part: ChatPart }
   /** `missed`: the turn ended without a real answer (fallback text or refusal); repeated misses trigger handoff. */
-  | { type: "done"; content: string; parts: ChatPart[]; missed?: boolean };
+  | { type: "done"; content: string; parts: ChatPart[]; missed?: boolean; toolLog?: ToolLogEntry[] };
+
+/** One tool call in a turn, for reliability reporting. */
+export type ToolLogEntry = { name: string; ok: boolean; code: string; ms: number };
 
 export type AssistantHistoryMessage = { role: "user" | "assistant"; content: string };
 
@@ -80,6 +90,10 @@ export async function* runLiveAssistant(input: {
   config: AiConfig;
   channel?: TurnChannel;
   signal?: AbortSignal;
+  /** Summary of messages older than the history window. */
+  conversationSummary?: string;
+  /** Files attached to the customer's current message, shown to the model when enabled. */
+  attachments?: MessageAttachment[];
 }): AsyncGenerator<OrchestratorEvent> {
   const latestUserText = [...input.history].reverse().find((message) => message.role === "user")?.content ?? "";
   const toolContext: ToolContext = {
@@ -90,13 +104,32 @@ export async function* runLiveAssistant(input: {
   };
   const tools = getProviderTools();
   const settings = input.session.store.settings;
-  const [openOrder, savedDetails] = await Promise.all([
+  const salesConfig = resolveSalesConfig(settings);
+  const [openOrder, savedDetails, engagement] = await Promise.all([
     describeOpenProposal(input.session).catch(() => null),
     savedDetailsForVisitor(input.session.storeId, input.session.visitorId).catch(() => null),
+    getEngagementState(input.session.sessionId).catch(() => null),
   ]);
+  const salesTurn = engagement
+    ? await salesTurnContext({ session: input.session, config: salesConfig, state: engagement, cart: input.cart, latestUserText, openOrder: Boolean(openOrder) }).catch(() => "")
+    : "";
+  const attachmentParts =
+    input.attachments?.length && attachmentUnderstandingEnabled(salesConfig.features.attachmentUnderstanding)
+      ? await loadAttachmentParts({
+          storeId: input.session.storeId,
+          conversationId: input.session.conversationId,
+          attachments: input.attachments,
+          config: input.config,
+        }).catch((error) => {
+          logger.warn("ai.attachments_failed", { error: error instanceof Error ? error.message : String(error) });
+          return [];
+        })
+      : [];
   const system = buildSystemPromptParts({
     openOrder,
     savedDetails,
+    salesTurn,
+    conversationSummary: input.conversationSummary,
     replyLanguage: detectLang(latestUserText, input.session.locale.startsWith("bn") ? "bn" : "en"),
     session: input.session,
     cart: input.cart,
@@ -110,8 +143,18 @@ export async function* runLiveAssistant(input: {
     { role: "system", content: system.perTurn },
     ...input.history.map((message) => ({ role: message.role, content: message.content })),
   ];
+  // The customer's files go with their latest message (only that one: earlier files stay as notes).
+  const lastIndex = messages.length - 1;
+  const lastMessage = messages[lastIndex];
+  const lastUserText = lastMessage?.role === "user" && typeof lastMessage.content === "string" ? lastMessage.content : null;
+  let withAttachments = false;
+  if (attachmentParts.length > 0 && lastUserText !== null) {
+    messages[lastIndex] = { role: "user", content: [{ type: "text", text: lastUserText || "(no text)" }, ...attachmentParts] };
+    withAttachments = true;
+  }
 
   const builder = createPartBuilder();
+  const toolLog: ToolLogEntry[] = [];
   let receivedAnyText = false;
   let turnRefused = false;
 
@@ -124,24 +167,40 @@ export async function* runLiveAssistant(input: {
     let raw: unknown;
     let refused = false;
 
-    for await (const event of streamCompletion({
-      config: input.config,
-      messages,
-      tools,
-      signal: input.signal,
-      temperature: 0.2,
-      toolChoice: finalRound ? "none" : "auto",
-    })) {
-      if (event.type === "delta") {
-        iterationText += event.text;
-        builder.appendText(event.text);
-        receivedAnyText = receivedAnyText || event.text.trim().length > 0;
-        yield { type: "delta", text: event.text };
-      } else {
-        toolCalls = event.toolCalls;
-        raw = event.raw;
-        refused = event.finishReason === "refusal";
+    try {
+      for await (const event of streamCompletion({
+        config: input.config,
+        messages,
+        tools,
+        signal: input.signal,
+        temperature: 0.2,
+        toolChoice: finalRound ? "none" : "auto",
+      })) {
+        if (event.type === "delta") {
+          iterationText += event.text;
+          builder.appendText(event.text);
+          receivedAnyText = receivedAnyText || event.text.trim().length > 0;
+          yield { type: "delta", text: event.text };
+        } else {
+          toolCalls = event.toolCalls;
+          raw = event.raw;
+          refused = event.finishReason === "refusal";
+        }
       }
+    } catch (error) {
+      // A model that can't take images/PDFs rejects the request: answer from text instead of failing.
+      const status = error instanceof ProviderError ? error.status : undefined;
+      if (withAttachments && !iterationText && status != null && [400, 413, 415, 422].includes(status)) {
+        logger.warn("ai.attachments_rejected", { storeId: input.session.storeId, status });
+        withAttachments = false;
+        messages[lastIndex] = {
+          role: "user",
+          content: `${lastUserText}\n[The customer attached a file, but this AI model can't read files. Say so in a few words and ask them to describe it.]`,
+        };
+        iteration -= 1;
+        continue;
+      }
+      throw error;
     }
 
     if (refused) {
@@ -167,7 +226,14 @@ export async function* runLiveAssistant(input: {
     });
 
     for (const call of toolCalls) {
+      const toolStarted = Date.now();
       const result = await executeTool(toolContext, call.function.name, call.function.arguments);
+      toolLog.push({
+        name: call.function.name,
+        ok: result.ok,
+        code: result.ok ? "" : String((result.content as { error?: { code?: string } })?.error?.code ?? "error"),
+        ms: Date.now() - toolStarted,
+      });
       if (!result.ok) {
         logger.warn("ai.tool_rejected", {
           tool: call.function.name,
@@ -198,7 +264,36 @@ export async function* runLiveAssistant(input: {
   }
 
   const parts = builder.finish();
-  yield { type: "done", content: builder.text() || buildTextFromParts(parts), parts, missed };
+  yield { type: "done", content: builder.text() || buildTextFromParts(parts), parts, missed, toolLog };
+}
+
+async function salesTurnContext(input: {
+  session: SessionContext;
+  config: SalesConfig;
+  state: EngagementState;
+  cart: CartPayload;
+  latestUserText: string;
+  openOrder: boolean;
+}): Promise<string> {
+  if (!input.config.enabled) return "";
+  const intent = detectShoppingIntent({ text: input.latestUserText, cartItemCount: input.cart.itemCount, openOrder: input.openOrder });
+  const recentIds = input.state.suggestedProductIds.slice(-8);
+  const [optedOut, suggested, profile] = await Promise.all([
+    isOptedOut({ storeId: input.session.storeId, visitorId: input.session.visitorId, state: input.state }),
+    recentIds.length
+      ? prisma.product.findMany({ where: { id: { in: recentIds }, storeId: input.session.storeId }, select: { name: true } })
+      : Promise.resolve([]),
+    findProfileForVisitor(input.session.storeId, input.session.visitorId).catch(() => null),
+  ]);
+  return buildSalesTurnContext({
+    config: input.config,
+    intent,
+    state: input.state,
+    optedOut,
+    cart: input.cart,
+    suggestedNames: suggested.map((product) => product.name),
+    returning: profile ? { orders: profile.orderCount, interests: profile.interests } : null,
+  });
 }
 
 function buildTextFromParts(parts: ChatPart[]): string {

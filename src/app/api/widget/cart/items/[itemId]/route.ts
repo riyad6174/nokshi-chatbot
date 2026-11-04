@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { CartError, getActiveCart, removeItem, updateItem } from "@/modules/cart/cart.service";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { rateLimit } from "@/lib/rate-limit";
 import { removeCartItemSchema, updateCartItemSchema } from "@/lib/validation/schemas";
 import { getSessionContext } from "@/modules/conversations/session.service";
 
@@ -13,7 +13,7 @@ async function resolveContext(request: NextRequest, itemId: string) {
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return { error: jsonError(401, "session_required", "Start a chat session first.") } as const;
 
-  const rate = checkRateLimit(`cart:${sessionId}`, 60, 60_000);
+  const rate = await rateLimit(`cart:${sessionId}`, 60, 60_000);
   if (!rate.allowed) {
     return { error: jsonError(429, "rate_limited", "Too many cart changes. Please slow down.") } as const;
   }

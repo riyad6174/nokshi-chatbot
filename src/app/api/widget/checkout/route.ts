@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { logger } from "@/lib/logging/logger";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { rateLimit } from "@/lib/rate-limit";
 import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { checkoutRequestSchema } from "@/lib/validation/schemas";
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return jsonError(401, "session_required", "Start a chat session first.");
 
-  const rate = checkRateLimit(`checkout:${sessionId}`, 10, 60_000);
+  const rate = await rateLimit(`checkout:${sessionId}`, 10, 60_000);
   if (!rate.allowed) return jsonError(429, "rate_limited", "Too many checkout attempts. Please wait a moment.");
 
   const context = await getSessionContext(sessionId);

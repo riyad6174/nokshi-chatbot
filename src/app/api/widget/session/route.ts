@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import type { NextResponse } from "next/server";
-import { getClientIp, checkRateLimit } from "@/lib/rate-limit";
+import { getClientIp, rateLimit } from "@/lib/rate-limit";
 import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
 import { createWidgetToken, readWidgetSessionId, widgetCookieOptions, WIDGET_COOKIE } from "@/lib/auth/widget";
 import { widgetSessionRequestSchema } from "@/lib/validation/schemas";
@@ -16,6 +16,8 @@ import {
 } from "@/modules/conversations/session.service";
 import { parseJsonArray, parseJsonObject } from "@/modules/stores/store.service";
 import { isLiveAiEnabled } from "@/modules/ai/run";
+import { resolveSalesConfig } from "@/modules/sales/config";
+import { engagementClientSettings } from "@/modules/sales/engagement.service";
 import { prisma } from "@/lib/db/prisma";
 import { env } from "@/lib/config/env";
 import { speechMode } from "@/modules/speech/config";
@@ -55,7 +57,7 @@ function parseTopics(value: string | null | undefined): SuggestedTopic[] {
 }
 
 export async function POST(request: NextRequest) {
-  const rate = checkRateLimit(`session:${getClientIp(request)}`, 60, 60_000);
+  const rate = await rateLimit(`session:${getClientIp(request)}`, 60, 60_000);
   if (!rate.allowed) {
     return jsonError(429, "rate_limited", "Too many session requests. Please try again shortly.");
   }
@@ -124,6 +126,7 @@ export async function POST(request: NextRequest) {
       attachmentsEnabled: settings?.attachmentsEnabled ?? true,
       theme: parseTheme(settings?.widgetTheme),
       aiMode: isLiveAiEnabled(context.store) ? "live" : "demo",
+      engagement: engagementClientSettings(resolveSalesConfig(settings)),
     },
     messages,
     cart,

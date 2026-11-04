@@ -7,10 +7,16 @@ export type ProviderToolCall = {
   function: { name: string; arguments: string };
 };
 
+/** Parts of a customer message beyond text: attached images and PDFs (base64). */
+export type UserContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; mime: string; data: string; name?: string }
+  | { type: "document"; mime: "application/pdf"; data: string; name?: string };
+
 export type ProviderMessage =
   /** `cache`: this block is the same on every turn, so providers that support prompt caching may cache up to it. */
   | { role: "system"; content: string; cache?: boolean }
-  | { role: "user"; content: string }
+  | { role: "user"; content: string | UserContentPart[] }
   | {
       role: "assistant";
       content: string | null;
@@ -119,6 +125,18 @@ function toOpenAiMessages(messages: ProviderMessage[]) {
     }
     if (message.role === "tool") {
       return { role: message.role, content: message.content, tool_call_id: message.tool_call_id, name: message.name };
+    }
+    if (message.role === "user" && Array.isArray(message.content)) {
+      return {
+        role: "user" as const,
+        content: message.content.map((part) =>
+          part.type === "text"
+            ? { type: "text", text: part.text }
+            : part.type === "image"
+              ? { type: "image_url", image_url: { url: `data:${part.mime};base64,${part.data}` } }
+              : { type: "file", file: { filename: part.name || "document.pdf", file_data: `data:application/pdf;base64,${part.data}` } },
+        ),
+      };
     }
     return message;
   });

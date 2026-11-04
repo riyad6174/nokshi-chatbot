@@ -74,6 +74,25 @@ export async function GET() {
     }
   }
 
+  // Operational signals for monitoring (reported, but they don't fail the deployment check).
+  const alerts: string[] = [];
+  if (checks.database?.ok) {
+    try {
+      const [{ jobQueueHealth }, { recentAiErrorRate }] = await Promise.all([
+        import("@/modules/jobs/job.service"),
+        import("@/modules/analytics/turn-log.service"),
+      ]);
+      const [jobs, ai] = await Promise.all([jobQueueHealth(), recentAiErrorRate(null, 15)]);
+      checks.jobs = { ok: true, detail: `${jobs.queued} queued, ${jobs.overdue} overdue, ${jobs.failedLast24h} failed in 24 h` };
+      checks.aiErrors = { ok: true, detail: `${ai.errors} of ${ai.total} turns failed in the last 15 min` };
+      if (jobs.overdue > 0) alerts.push("Background jobs are overdue: is GET /api/cron/jobs scheduled every minute?");
+      if (jobs.failedLast24h > 0) alerts.push(`${jobs.failedLast24h} background job(s) failed in the last 24 h.`);
+      if (ai.total >= 10 && ai.rate > 0.2) alerts.push(`AI error rate is ${Math.round(ai.rate * 100)}% over the last 15 min: check the AI provider.`);
+    } catch {
+      // Monitoring signals are best effort.
+    }
+  }
+
   const ok = Object.values(checks).every((check) => check.ok);
-  return NextResponse.json({ ok, checks }, { status: ok ? 200 : 503, headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok, checks, alerts }, { status: ok ? 200 : 503, headers: { "Cache-Control": "no-store" } });
 }

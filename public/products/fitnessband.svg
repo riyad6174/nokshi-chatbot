@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="Smart Fitness Band illustration">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e4eef0"/>
+      <stop offset="1" stop-color="#bfd6da"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <circle cx="170" cy="170" r="120" fill="#ffffff" opacity="0.35"/>
+  <ellipse cx="400" cy="690" rx="235" ry="32" fill="#000000" opacity="0.12"/>
+  <rect x="345" y="120" width="110" height="580" rx="55" fill="#1f2937"/>
+  <rect x="320" y="300" width="160" height="220" rx="40" fill="#0f172a" stroke="#475569" stroke-width="8"/>
+  <text x="400" y="420" font-family="sans-serif" font-size="56" font-weight="700" fill="#5eead4" text-anchor="middle">10:24</text>
+  <path d="M350 470h30l15-25 20 50 15-25h20" fill="none" stroke="#f472b6" stroke-width="6"/>
+</svg>

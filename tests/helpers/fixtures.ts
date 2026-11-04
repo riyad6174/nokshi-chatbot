@@ -3,6 +3,10 @@ import { createSession, type SessionContext } from "@/modules/conversations/sess
 
 export async function resetDb() {
   // Children first so relation emulation has nothing left to cascade.
+  await prisma.marketingMessage.deleteMany();
+  await prisma.marketingCampaign.deleteMany();
+  await prisma.job.deleteMany();
+  await prisma.aiTurnLog.deleteMany();
   await prisma.customerEvent.deleteMany();
   await prisma.customerProfile.deleteMany();
   await prisma.order.deleteMany();
@@ -175,3 +179,100 @@ export async function newSession(widgetKey = "key-a"): Promise<SessionContext> {
   if (!session) throw new Error(`No store for widget key ${widgetKey}`);
   return session;
 }
+
+export type SeedProduct = {
+  name: string;
+  category: string;
+  priceMinor: number;
+  attributes?: Record<string, string>;
+  description?: string;
+  status?: "active" | "inactive";
+  /** Variants as [title, options, stockQuantity]; none = a simple product. */
+  variants?: Array<{ title: string; options?: Record<string, string>; stockQuantity?: number | null; outOfStock?: boolean }>;
+};
+
+/** A store for one industry, with its sales configuration and catalog. Product ids are keyed by name. */
+export async function seedIndustryStore(input: {
+  widgetKey: string;
+  industry: string;
+  products: SeedProduct[];
+  salesConfig?: Record<string, unknown>;
+}) {
+  const store = await prisma.store.create({
+    data: {
+      name: `${input.industry} store`,
+      websiteDomain: `${input.widgetKey}.example`,
+      widgetKey: input.widgetKey,
+      currency: "BDT",
+      defaultLocale: "en",
+      supportedLocales: JSON.stringify(["en", "bn-BD"]),
+      settings: {
+        create: {
+          welcomeMessage: "Hi",
+          fallbackMessage: "Fallback",
+          salesConfig: JSON.stringify({ industry: input.industry, ...(input.salesConfig ?? {}) }),
+        },
+      },
+    },
+    include: { settings: true },
+  });
+  const ids: Record<string, string> = {};
+  for (const [index, product] of input.products.entries()) {
+    const created = await prisma.product.create({
+      data: {
+        storeId: store.id,
+        name: product.name,
+        slug: `${product.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${index}`,
+        description: product.description ?? `${product.name}.`,
+        category: product.category,
+        priceMinor: product.priceMinor,
+        currency: "BDT",
+        status: product.status ?? "active",
+        attributes: JSON.stringify(product.attributes ?? {}),
+      },
+    });
+    ids[product.name] = created.id;
+    for (const [variantIndex, variant] of (product.variants ?? []).entries()) {
+      await prisma.productVariant.create({
+        data: {
+          productId: created.id,
+          storeId: store.id,
+          sku: `${created.id.slice(-6)}-${variantIndex}`,
+          title: variant.title,
+          options: JSON.stringify(variant.options ?? {}),
+          stockQuantity: variant.stockQuantity ?? null,
+          stockStatus: variant.outOfStock ? "out_of_stock" : "in_stock",
+        },
+      });
+    }
+  }
+  return { store, ids };
+}
+
+export const GROCERY_PRODUCTS: SeedProduct[] = [
+  { name: "Fresh Potatoes 1kg", category: "Vegetables", priceMinor: 6000 },
+  { name: "Red Onions 1kg", category: "Vegetables", priceMinor: 8000 },
+  { name: "Green Chilies 250g", category: "Vegetables", priceMinor: 3000 },
+  { name: "Turmeric Powder", category: "Spices", priceMinor: 9000 },
+  { name: "Garlic 250g", category: "Vegetables", priceMinor: 5000, variants: [{ title: "250g", stockQuantity: 0, outOfStock: true }] },
+  { name: "Soybean Cooking Oil 1L", category: "Oil", priceMinor: 19000 },
+  { name: "Basmati Rice 5kg", category: "Rice", priceMinor: 95000 },
+];
+
+export const FASHION_PRODUCTS: SeedProduct[] = [
+  { name: "Oxford Shirt", category: "Shirts", priceMinor: 220000, attributes: { color: "White", fit: "Slim" }, variants: [{ title: "M", options: { size: "M" } }, { title: "L", options: { size: "L" } }] },
+  { name: "Beige Chinos", category: "Pants", priceMinor: 250000, attributes: { color: "Beige" } },
+  { name: "Red Joggers", category: "Pants", priceMinor: 150000, attributes: { color: "Red" } },
+  { name: "Luxury Navy Trousers", category: "Pants", priceMinor: 900000, attributes: { color: "Navy" } },
+  { name: "Leather Belt", category: "Belts", priceMinor: 90000, attributes: { color: "Brown" } },
+  { name: "Retired Khaki Pants", category: "Pants", priceMinor: 120000, attributes: { color: "Khaki" }, status: "inactive" },
+];
+
+export const ELECTRONICS_PRODUCTS: SeedProduct[] = [
+  { name: "Phone X", category: "Phones", priceMinor: 4500000, attributes: { model: "Phone X", connector: "USB-C" } },
+  { name: "Phone X Silicone Case", category: "Cases", priceMinor: 120000, attributes: { compatible_with: "Phone X" } },
+  { name: "Phone Y Leather Case", category: "Cases", priceMinor: 150000, attributes: { compatible_with: "Phone Y" } },
+  { name: "65W USB-C Charger", category: "Chargers", priceMinor: 250000, attributes: { connector: "USB-C" } },
+  { name: "Lightning Cable", category: "Cables", priceMinor: 80000, attributes: { connector: "Lightning" } },
+  { name: "Phone X Glass Protector", category: "Screen protectors", priceMinor: 60000, attributes: { compatible_with: "Phone X, Phone X Pro" }, variants: [{ title: "Clear", stockQuantity: 0 }] },
+];

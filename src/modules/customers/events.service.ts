@@ -9,7 +9,17 @@ export type CustomerEventType =
   | "checkout_started"
   | "order_placed"
   | "abandoned_cart"
-  | "voice_turn";
+  | "voice_turn"
+  | "searched"
+  | "compared"
+  | "recommendation_shown"
+  | "recommendation_clicked"
+  | "proactive_shown"
+  | "proactive_dismissed"
+  | "proactive_opt_out"
+  | "marketing_sent"
+  | "marketing_clicked"
+  | "cart_recovered";
 
 /**
  * Records shopping activity. Best effort: analytics must never break a customer action, so errors

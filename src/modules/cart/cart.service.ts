@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { variantAvailable, variantPriceMinor, type ProductWithVariants } from "@/modules/catalog/product.service";
 import { trackEvent } from "@/modules/customers/events.service";
+import { parseEngagementState } from "@/modules/sales/state";
 import type { CartPayload } from "@/types/chat";
 import { isObjectId } from "@/lib/db/ids";
 
@@ -204,6 +205,12 @@ export async function addItem(input: {
 
   await prisma.cart.update({ where: { id: cart.id }, data: { updatedAt: new Date() } });
   const updated = await prisma.cart.findUniqueOrThrow({ where: { id: cart.id }, include: cartInclude });
+  // Attribute the addition to a suggestion shown earlier in this visit, for recommendation conversion.
+  const engagement = await prisma.chatSession
+    .findUnique({ where: { id: input.sessionId }, select: { engagement: true } })
+    .then((session) => parseEngagementState(session?.engagement))
+    .catch(() => null);
+  const fromRecommendation = Boolean(engagement?.suggestedProductIds.includes(product.id));
   await trackEvent({
     storeId: input.storeId,
     sessionId: input.sessionId,
@@ -211,7 +218,7 @@ export async function addItem(input: {
     productId: product.id,
     cartId: cart.id,
     valueMinor: variantPriceMinor(product, variant) * input.quantity,
-    meta: { variantId: variant?.id ?? null, quantity: input.quantity },
+    meta: { variantId: variant?.id ?? null, quantity: input.quantity, fromRecommendation },
   });
   return buildSummary(updated);
 }

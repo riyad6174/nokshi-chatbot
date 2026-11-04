@@ -18,12 +18,14 @@ import { getRecommendationsTool } from "@/modules/ai/tools/get-recommendations";
 import { saveCustomerProfileTool } from "@/modules/ai/tools/save-customer-profile";
 import { collectContactDetailsTool } from "@/modules/ai/tools/collect-contact-details";
 import { goToCheckoutTool, openProductPageTool } from "@/modules/ai/tools/navigation";
+import { compareProductsTool } from "@/modules/ai/tools/compare-products";
 import type { ToolContext, ToolDefinition, ToolExecutionResult } from "@/modules/ai/tools/types";
 
 const tools: ToolDefinition[] = [
   searchProductsTool,
   getProductDetailsTool,
   getRecommendationsTool,
+  compareProductsTool,
   searchKnowledgeTool,
   getCartTool,
   addToCartTool,
