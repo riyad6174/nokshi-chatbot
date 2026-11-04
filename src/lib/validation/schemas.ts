@@ -156,6 +156,16 @@ export const chatbotSettingsFormSchema = z.object({
   enabledFeatures: z.string().trim().max(1000).default(""),
 });
 
+export const voiceSettingsFormSchema = z.object({
+  engine: z.enum(["realtime", "cascade"]),
+  model: z.string().trim().min(1, "Choose a voice model").max(100),
+  voice: z.string().trim().min(1, "Choose a voice").max(50),
+  speed: z.coerce.number().min(0.75, "Speed is between 0.75 and 1.4").max(1.4, "Speed is between 0.75 and 1.4"),
+  style: z.string().trim().max(500),
+  apiKey: z.string().trim().max(500),
+  clearKey: z.boolean(),
+});
+
 export const aiConnectionFormSchema = z.object({
   provider: z.string().trim().min(1).max(50),
   baseUrl: z

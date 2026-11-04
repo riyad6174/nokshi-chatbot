@@ -6,9 +6,10 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { encryptSecret, lastFour } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db/prisma";
 import { logger } from "@/lib/logging/logger";
-import { aiConnectionFormSchema } from "@/lib/validation/schemas";
+import { aiConnectionFormSchema, voiceSettingsFormSchema } from "@/lib/validation/schemas";
 import { resolveAiStatus, type AiConfig } from "@/modules/ai/config";
 import { getPreset } from "@/modules/ai/presets";
+import { realtimeApiKey } from "@/modules/realtime/realtime.service";
 import { getPrimaryStore } from "@/modules/stores/store.service";
 
 const PATH = "/admin/ai";
@@ -165,6 +166,101 @@ export async function testAiConnectionAction(
       provider: preset.id,
       status: (error as { status?: number })?.status ?? null,
     });
+    return { ok: false, message: describeError(error), models: [], latencyMs: Date.now() - started };
+  }
+}
+
+// --- Live voice (OpenAI Realtime) ---------------------------------------------------------------
+
+function parseVoiceForm(formData: FormData) {
+  return voiceSettingsFormSchema.safeParse({
+    engine: formData.get("engine") ?? "realtime",
+    model: formData.get("model") ?? "",
+    voice: formData.get("voice") ?? "",
+    speed: formData.get("speed") ?? "1",
+    style: formData.get("style") ?? "",
+    apiKey: formData.get("apiKey") ?? "",
+    clearKey: formData.get("clearKey") === "on",
+  });
+}
+
+export async function saveVoiceSettingsAction(formData: FormData) {
+  const store = await adminStore();
+  const parsed = parseVoiceForm(formData);
+  if (!parsed.success) {
+    redirect(`${PATH}?error=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Check the voice fields.")}`);
+  }
+  const data = parsed.data;
+  // A blank key field keeps the stored voice key; "remove" goes back to the AI model key above.
+  const keyUpdate = data.apiKey
+    ? { realtimeApiKeyEncrypted: encryptSecret(data.apiKey), realtimeApiKeyLast4: lastFour(data.apiKey) }
+    : data.clearKey
+      ? { realtimeApiKeyEncrypted: "", realtimeApiKeyLast4: "" }
+      : {};
+  const fields = {
+    voiceEngine: data.engine,
+    realtimeModel: data.model,
+    realtimeVoice: data.voice,
+    realtimeVoiceSpeed: data.speed,
+    realtimeVoiceStyle: data.style,
+    ...keyUpdate,
+  };
+
+  await prisma.chatbotSettings.upsert({
+    where: { storeId: store.id },
+    update: fields,
+    create: {
+      storeId: store.id,
+      welcomeMessage: "Hi! How can I help you shop today?",
+      fallbackMessage: "I could not find that in the store information.",
+      ...fields,
+    },
+  });
+  logger.info("admin.voice_settings_saved", {
+    storeId: store.id,
+    engine: data.engine,
+    model: data.model,
+    keyChanged: Boolean(data.apiKey) || data.clearKey,
+  });
+
+  revalidatePath(PATH);
+  redirect(`${PATH}?saved=voice`);
+}
+
+/** Checks the voice key and model by minting a call token (free; no call is made with it). */
+export async function testVoiceConnectionAction(
+  _previous: ConnectionTestResult | null,
+  formData: FormData,
+): Promise<ConnectionTestResult> {
+  const store = await adminStore();
+  const parsed = parseVoiceForm(formData);
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Check the voice fields.", models: [] };
+  const data = parsed.data;
+  const withoutSavedVoiceKey = { settings: store.settings ? { ...store.settings, realtimeApiKeyEncrypted: "" } : null };
+  const apiKey = data.apiKey || realtimeApiKey(data.clearKey ? withoutSavedVoiceKey : store);
+  if (!apiKey) {
+    return { ok: false, message: "No OpenAI key: enter one here, or use OpenAI as the AI model provider above.", models: [] };
+  }
+
+  const started = Date.now();
+  try {
+    const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expires_after: { anchor: "created_at", seconds: 10 },
+        session: { type: "realtime", model: data.model, audio: { output: { voice: data.voice, speed: data.speed } } },
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const latencyMs = Date.now() - started;
+    if (response.ok) return { ok: true, message: `Connected. "${data.model}" with the "${data.voice}" voice is ready.`, models: [], latencyMs };
+    const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+    const detail = body?.error?.message?.slice(0, 200);
+    if (response.status === 401) return { ok: false, message: "OpenAI rejected the API key.", models: [], latencyMs };
+    if (response.status === 429) return { ok: false, message: "OpenAI is rate-limiting this key, or the account is out of credit.", models: [], latencyMs };
+    return { ok: false, message: detail ? `OpenAI said: ${detail}` : `OpenAI returned an error (${response.status}).`, models: [], latencyMs };
+  } catch (error) {
     return { ok: false, message: describeError(error), models: [], latencyMs: Date.now() - started };
   }
 }

@@ -1,8 +1,11 @@
 import { AdminBanner } from "@/components/dashboard/AdminBanner";
 import { AiConnectionForm } from "@/components/dashboard/AiConnectionForm";
+import { VoiceSettingsForm } from "@/components/dashboard/VoiceSettingsForm";
 import { requireAdmin } from "@/lib/auth/admin";
+import { decryptSecret } from "@/lib/crypto/secrets";
 import { resolveAiStatus } from "@/modules/ai/config";
 import { EFFORT_LEVELS, PROVIDER_PRESETS, getPreset } from "@/modules/ai/presets";
+import { realtimeApiKey, realtimeSettings } from "@/modules/realtime/realtime.service";
 import { getPrimaryStore } from "@/modules/stores/store.service";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +23,11 @@ export default async function AdminAiPage({
   const status = resolveAiStatus(store.settings);
   const preset = getPreset(status.providerId);
   const live = status.config !== null;
+  const voice = realtimeSettings(store);
 
   return (
     <div className="max-w-3xl">
-      <AdminBanner error={error} saved={saved} savedMessage="AI connection saved. New messages use it immediately." />
+      <AdminBanner error={error} saved={saved} savedMessage={saved === "voice" ? "Voice settings saved. The next voice call uses them." : "AI connection saved. New messages use it immediately."} />
 
       <h1 className="font-serif text-2xl text-stone-900">AI model</h1>
       <p className="mt-1 text-[12px] text-stone-500">
@@ -76,6 +80,24 @@ export default async function AdminAiPage({
             keySource: status.keySource,
             keyLast4: status.keyLast4,
             keyUnreadable: status.keyUnreadable,
+          }}
+        />
+      </section>
+
+      <section className="mt-5 rounded-xl border border-stone-200 bg-white p-5">
+        <h2 className="text-[13px] font-semibold text-stone-900">Live voice</h2>
+        <p className="mt-0.5 text-[10.5px] text-stone-400">
+          The voice assistant runs on OpenAI Realtime, separately from the text chat model above. Changes apply to the next call.
+        </p>
+        <VoiceSettingsForm
+          initial={{
+            engine: voice.engine,
+            model: voice.model,
+            voice: voice.voice,
+            speed: voice.speed,
+            style: voice.style,
+            keyLast4: decryptSecret(store.settings?.realtimeApiKeyEncrypted) ? store.settings?.realtimeApiKeyLast4 || "" : "",
+            mainKeyUsable: realtimeApiKey({ settings: store.settings ? { ...store.settings, realtimeApiKeyEncrypted: "" } : null }) !== null,
           }}
         />
       </section>

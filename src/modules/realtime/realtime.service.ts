@@ -1,4 +1,5 @@
 import { env } from "@/lib/config/env";
+import { decryptSecret } from "@/lib/crypto/secrets";
 import { logger } from "@/lib/logging/logger";
 import { resolveAiConfig } from "@/modules/ai/config";
 import { buildSystemInstructions } from "@/modules/ai/system-instructions";
@@ -29,8 +30,27 @@ export class RealtimeError extends Error {
   }
 }
 
-/** The OpenAI key realtime runs on: the store's AI key when the store uses OpenAI. Null otherwise. */
+/** Live voice settings: what's set in Admin → AI model, otherwise the VOICE_ENGINE / REALTIME_* env. */
+export function realtimeSettings(store: Pick<StoreWithSettings, "settings">) {
+  const settings = store.settings;
+  const engine = settings?.voiceEngine === "realtime" || settings?.voiceEngine === "cascade" ? settings.voiceEngine : env.VOICE_ENGINE;
+  const speed = settings?.realtimeVoiceSpeed;
+  return {
+    engine,
+    model: settings?.realtimeModel?.trim() || env.REALTIME_MODEL,
+    voice: settings?.realtimeVoice?.trim() || env.REALTIME_VOICE,
+    speed: typeof speed === "number" && speed >= 0.75 && speed <= 1.4 ? speed : env.REALTIME_VOICE_SPEED,
+    style: settings?.realtimeVoiceStyle?.trim() || env.REALTIME_VOICE_STYLE,
+  };
+}
+
+/**
+ * The OpenAI key realtime runs on: the voice key from Admin → AI model, otherwise the store's AI key
+ * when the store uses OpenAI. Null otherwise.
+ */
 export function realtimeApiKey(store: Pick<StoreWithSettings, "settings">): string | null {
+  const voiceKey = decryptSecret(store.settings?.realtimeApiKeyEncrypted);
+  if (voiceKey) return voiceKey;
   const config = resolveAiConfig(store.settings);
   if (!config || config.kind !== "openai-compatible" || !config.baseUrl.startsWith(OPENAI_BASE) || !config.apiKey) return null;
   return config.apiKey;
@@ -38,7 +58,7 @@ export function realtimeApiKey(store: Pick<StoreWithSettings, "settings">): stri
 
 /** Which voice engine this store's widget uses. Realtime needs an OpenAI key; otherwise the cascade. */
 export function voiceEngine(store: Pick<StoreWithSettings, "settings">): "realtime" | "cascade" {
-  return env.VOICE_ENGINE === "realtime" && realtimeApiKey(store) ? "realtime" : "cascade";
+  return realtimeSettings(store).engine === "realtime" && realtimeApiKey(store) ? "realtime" : "cascade";
 }
 
 const LIVE_CALL_RULES = `LIVE CALL: you are on a real-time voice call. You hear the customer directly and they hear you as you speak.
@@ -75,7 +95,7 @@ export async function realtimeInstructions(context: SessionContext): Promise<str
     savedDetails,
     replyLanguage: "auto",
   });
-  return `${base}\n\n${LIVE_CALL_RULES}\n\n${SOUND_HUMAN}\n\nHOW YOU SOUND: ${env.REALTIME_VOICE_STYLE}`;
+  return `${base}\n\n${LIVE_CALL_RULES}\n\n${SOUND_HUMAN}\n\nHOW YOU SOUND: ${realtimeSettings(context.store).style}`;
 }
 
 /** What the assistant says first when the call connects. */
@@ -110,6 +130,7 @@ export type RealtimeSessionGrant = {
 export async function createRealtimeSession(context: SessionContext): Promise<RealtimeSessionGrant> {
   const apiKey = realtimeApiKey(context.store);
   if (!apiKey) throw new RealtimeError("Realtime voice needs an OpenAI key in Admin → AI model.");
+  const voice = realtimeSettings(context.store);
   const [instructions, saved] = await Promise.all([
     realtimeInstructions(context),
     savedDetailsForVisitor(context.storeId, context.visitorId).catch(() => null),
@@ -122,7 +143,7 @@ export async function createRealtimeSession(context: SessionContext): Promise<Re
       expires_after: { anchor: "created_at", seconds: SECRET_TTL_SECONDS },
       session: {
         type: "realtime",
-        model: env.REALTIME_MODEL,
+        model: voice.model,
         instructions,
         tools: realtimeTools(),
         tool_choice: "auto",
@@ -133,7 +154,7 @@ export async function createRealtimeSession(context: SessionContext): Promise<Re
             noise_reduction: { type: "near_field" },
             turn_detection: { type: "semantic_vad", eagerness: "high", create_response: true, interrupt_response: true },
           },
-          output: { voice: env.REALTIME_VOICE, speed: env.REALTIME_VOICE_SPEED },
+          output: { voice: voice.voice, speed: voice.speed },
         },
       },
     }),
@@ -154,7 +175,7 @@ export async function createRealtimeSession(context: SessionContext): Promise<Re
           : "Live voice could not start. Please try again.";
     throw new RealtimeError(reason, response.status);
   }
-  return { clientSecret: body.value, expiresAt: body.expires_at ?? 0, model: env.REALTIME_MODEL, opener: openerInstruction(saved) };
+  return { clientSecret: body.value, expiresAt: body.expires_at ?? 0, model: voice.model, opener: openerInstruction(saved) };
 }
 
 /** Tool output for the model: the tool's content, kept small (cards carry the details on screen). */

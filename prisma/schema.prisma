@@ -53,6 +53,15 @@ model ChatbotSettings {
   aiApiKeyEncrypted  String   @default("")
   aiApiKeyLast4      String   @default("")
   aiEffort           String   @default("medium")
+  // Live voice (Admin → AI model). Optional: blank uses the VOICE_ENGINE / REALTIME_* env values.
+  voiceEngine             String?
+  realtimeModel           String?
+  realtimeVoice           String?
+  realtimeVoiceSpeed      Float?
+  realtimeVoiceStyle      String?
+  // A separate OpenAI key for voice; blank uses the AI model key above when it's an OpenAI key.
+  realtimeApiKeyEncrypted String?
+  realtimeApiKeyLast4     String?
   assistantName      String   @default("Shopping assistant")
   // friendly | professional | playful | luxury | custom
   tone               String   @default("friendly")
