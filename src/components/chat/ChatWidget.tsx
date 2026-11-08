@@ -190,12 +190,16 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         if (!response.ok) throw new Error(body?.error?.message || "Could not start the chat.");
         const data = body as WidgetSessionResponse;
         storeVisitorId(data.visitorId);
+        const sameConversation = sessionRef.current?.conversationId === data.conversationId;
         sessionRef.current = data;
         engagementRef.current = data.settings.engagement;
         if (data.settings.engagement?.enabled) storageRemove(ENGAGEMENT_OFF_KEY);
         greetedProductRef.current = productId;
         setSession(data);
-        setMessages(data.messages);
+        // A re-sync (e.g. moving to a product page during a call) keeps what's on screen, including
+        // a live reply that isn't saved yet; only a new conversation replaces the history.
+        if (sameConversation) setMessages((current) => mergeMessages(current, data.messages));
+        else setMessages(data.messages);
         noteLatest(data.messages);
         setCart(data.cart);
         setMode(data.conversationMode);
@@ -219,7 +223,13 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   }, [open, initSession, sessionError]);
 
   // Moving to another product page while the chat is open: re-sync so the product greeting appears.
+  // Not during a voice call: the assistant itself opened the page and is talking about it.
+  const voiceActiveRef = useRef(false);
   useEffect(() => {
+    if (voiceActiveRef.current) {
+      greetedProductRef.current = productId;
+      return;
+    }
     if (open && sessionRef.current && productId && greetedProductRef.current !== productId) void initSession();
   }, [open, productId, initSession]);
 
@@ -676,6 +686,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
 
   const voiceEngine = session?.settings.voiceAssistant.engine ?? "cascade";
   const voiceSession = voiceEngine === "realtime" ? realtimeVoice : cascadeVoice;
+  voiceActiveRef.current = voiceSession.active;
   voiceLangRef.current = cascadeVoice.lang;
   setVoiceLangRef.current = cascadeVoice.setLang;
   const [voiceCaps, setVoiceCaps] = useState({ server: false, browser: false });
@@ -833,7 +844,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       // Only once the call is connected: while it's still connecting (e.g. the microphone prompt is
       // unanswered), a typed message goes through the normal chat instead of getting lost.
       const connected = voiceSession.active && voiceSession.phase !== "starting";
-      if (connected && text.trim() && mode === "bot") void voiceSession.submitText(text.trim());
+      if (connected && text.trim() && mode !== "human") void voiceSession.submitText(text.trim());
       else void sendMessage(text);
     },
     [mode, sendMessage, voiceSession],
@@ -901,8 +912,9 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     setOpen(false);
   }, [voiceSession]);
 
-  // A team member is handling the chat: that conversation happens in the text chat.
-  const voiceView = open && view === "voice" && mode === "bot";
+  // A team member is replying: that conversation happens in the text chat. A handoff that is only
+  // waiting for someone keeps the voice panel, so the call isn't swapped for the text chat.
+  const voiceView = open && view === "voice" && (mode !== "human" || voiceSession.active);
 
   // New cards (products found, cart, order summary) open the centre stage; the same cards don't
   // reopen it after the customer hid them.

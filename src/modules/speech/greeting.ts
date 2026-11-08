@@ -12,15 +12,15 @@ const DEFAULTS: Record<GreetingKind, Record<SpeechLang, string>> = {
     bn: "হ্যালো, আমি আপনার voice assistant। আপনাকে কিভাবে সাহায্য করতে পারি আমাকে জানান।",
   },
   start: {
-    en: "Hello, I'm listening.",
-    bn: "হ্যালো, আমি শুনছি।",
+    en: "Hello! How can I help you today?",
+    bn: "হ্যালো! বলুন, আপনাকে কিভাবে সাহায্য করতে পারি?",
   },
 };
 
 /** Voice opener for a customer whose name is already known. */
 export function knownCustomerOpener(name: string, lang: SpeechLang): string {
   const first = name.trim().split(/\s+/)[0] ?? name;
-  return lang === "bn" ? `হ্যালো ${first}, আমি শুনছি।` : `Hello ${first}, I'm listening.`;
+  return lang === "bn" ? `হ্যালো ${first}! বলুন, কিভাবে সাহায্য করতে পারি?` : `Hello ${first}! How can I help you today?`;
 }
 
 export function voiceAssistantEnabled(store: StoreWithSettings): boolean {

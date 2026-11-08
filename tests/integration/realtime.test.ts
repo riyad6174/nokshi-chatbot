@@ -70,7 +70,7 @@ describe("live voice (OpenAI Realtime)", () => {
     expect(response.status).toBe(200);
     expect(grant.clientSecret).toBe("ek_test_ephemeral");
     expect(JSON.stringify(grant)).not.toContain("sk-test-store-key");
-    expect(grant.opener).toContain("হ্যালো, আমি শুনছি।");
+    expect(grant.opener).toContain("আপনাকে কিভাবে সাহায্য করতে পারি");
 
     const call = sent.find((entry) => entry.url.endsWith("/realtime/client_secrets"))!;
     expect(call.auth).toBe("Bearer sk-test-store-key");

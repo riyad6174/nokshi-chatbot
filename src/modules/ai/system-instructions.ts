@@ -71,7 +71,10 @@ const VOICE_RULES = `VOICE MODE (your reply is spoken aloud; the customer talks 
 - Words come from speech recognition and may contain mistakes. Make a sensible guess from context. If the message is garbled or makes no sense here, don't guess: ask them to say it again in one short sentence ("Sorry, could you say that again?" / "দুঃখিত, আরেকবার বলবেন?"). For a clearly unusable detail (name, phone, address), use collect_contact_details.
 - Say prices naturally ("2,550 taka"). Point to the screen instead of describing cards ("I've put two options on your screen").
 - Refer to shown products by number ("the second one"); product lists are numbered in result order.
-- End with one short question or next step.`;
+- End with one short question or next step.
+- The customer shops hands-free: never ask them to click, tap or press anything (no "Add to cart বাটনে ক্লিক করুন"). Do it yourself with the tool: add_to_cart, open_product_page, propose_order, confirm_order.
+- Ask for their name only when they order, not at the start.
+- Before placing an order, read the details back in one sentence (name, phone, address, total) and ask if all is correct; on yes call confirm_order.`;
 
 function customerOnFile(saved: SavedDetails | null | undefined): string {
   if (!saved) return "CUSTOMER ON FILE: none yet (new customer).\n\n";
@@ -92,26 +95,36 @@ export function nextOrderStep(input: {
   cart: CartPayload;
   savedDetails: SavedDetails | null | undefined;
   openOrder: string | null | undefined;
+  channel?: TurnChannel;
 }): string {
+  const voice = input.channel === "voice";
   const saved = input.savedDetails;
   if (input.openOrder) {
-    return "The order summary is on screen. If the customer agrees in any way, call confirm_order now. If they want a change, update it and call propose_order again.";
+    return voice
+      ? "The order summary is on screen. If you haven't yet, read back name, phone, address and total in one sentence and ask if it's all correct. If the customer agrees in any way, call confirm_order now. If they want a change, update it and call propose_order again."
+      : "The order summary is on screen. If the customer agrees in any way, call confirm_order now. If they want a change, update it and call propose_order again.";
   }
   if (input.cart.items.length === 0) {
-    const getToKnow = !saved?.name
+    const getToKnow = voice
+      ? " Ask their name only when they order."
+      : !saved?.name
       ? ` Name unknown: ask "কি নামে আপনাকে ডাকতে পারি?" (or "What should I call you?") in this reply, alongside helping.`
       : !saved.phone
         ? ` You know their name (${saved.name}); when they show interest, ask for their phone number with a reason.`
         : !saved.address
           ? ` You know their name and phone; when natural, ask their area/address (e.g. to tell the delivery charge).`
           : "";
-    return `Cart is empty. Help them choose. When they say they want an item, call add_to_cart in this turn (pick the available variant if there is only one). Never say it was added unless add_to_cart succeeded.${getToKnow}`;
+    return `Cart is empty. Help them choose: search_products for what they ask (no query for "all products"). When they say they want an item, call add_to_cart in this turn (pick the available variant if there is only one). Never say it was added unless add_to_cart succeeded.${getToKnow}`;
   }
   const missing = [!saved?.name && "name", !saved?.phone && "phone number", !saved?.address && "delivery address"].filter(Boolean);
+  // On a call the customer decides when to order: after an add, ask "confirm the order, or see more?".
+  const whenOrdering = voice
+    ? `If they haven't asked to order yet, ask: "অর্ডার কনফার্ম করবো, নাকি আরো কিছু দেখবেন?" (English: "Shall I confirm the order, or would you like to see more?"). Once they want to order: `
+    : "";
   if (missing.length > 0) {
-    return `Cart has items. Not on file yet: ${missing.join(", ")}. Whatever of these the customer already said in this conversation, don't ask again. If you now have name, phone and address, call propose_order with them right away; otherwise ask only for what's still missing, in one short question.`;
+    return `Cart has items. ${whenOrdering}Not on file yet: ${missing.join(", ")}. Whatever of these the customer already said in this conversation, don't ask again. If you now have name, phone and address, call propose_order with them right away; otherwise ask only for what's still missing, in one short question.`;
   }
-  return `Cart has items and details are on file (${saved!.name}, ${saved!.phone}, ${saved!.address}). Ask once whether to use them; when they agree (or if they already did), call propose_order.`;
+  return `Cart has items. ${whenOrdering}Details are on file (${saved!.name}, ${saved!.phone}, ${saved!.address}). Ask once whether to use them; when they agree (or if they already did), call propose_order.`;
 }
 
 function replyIn(language: "en" | "bn" | "auto" | undefined): string {
@@ -215,7 +228,7 @@ ${cartLines}
 
 THIS TURN (follow strictly)
 - Reply in ${replyIn(context.replyLanguage)}, in ONE short sentence (about 12 words). Don't list or describe products the cards show.
-- Next step toward the order: ${nextOrderStep({ cart, savedDetails: context.savedDetails, openOrder: context.openOrder })}${salesTurn}`;
+- Next step toward the order: ${nextOrderStep({ cart, savedDetails: context.savedDetails, openOrder: context.openOrder, channel: context.channel })}${salesTurn}`;
 
   return { stable, perTurn };
 }

@@ -64,7 +64,19 @@ export function voiceEngine(store: Pick<StoreWithSettings, "settings">): "realti
 const LIVE_CALL_RULES = `LIVE CALL: you are on a real-time voice call. You hear the customer directly and they hear you as you speak.
 - Be brief and straightforward: ONE short sentence (about 12 words), at most two when you must ask something. Then stop and let them talk. No explanations they didn't ask for, no repeating what's on screen. If they interrupt, stop and listen; never lose track of what they asked before.
 - Before a tool call that takes a moment, you may say a two-word filler ("এক মিনিট…", "One sec…"), then go quiet until the result arrives.
-- Phone numbers: repeat them back digit by digit once, naturally, as part of your reply.`;
+- Phone numbers: repeat them back digit by digit once, naturally, as part of your reply.
+
+THE CUSTOMER CONTROLS EVERYTHING BY VOICE. You do every action yourself with your tools, right away:
+- NEVER tell the customer to click, tap, press or use any button, form or page ("Add to cart বাটনে চাপ দিন" is forbidden). If they want something done, call the tool and do it.
+- "কি কি প্রোডাক্ট আছে?" / "সব প্রোডাক্ট দেখান" / "what do you have?" -> call search_products with NO query (it shows all products), then say how many there are and ask which one they like.
+- They name or describe a product ("লাল শাড়ি", "a backpack") -> search_products with that, in English catalog words. Never answer about products without searching first.
+- "এটার details বলেন" / "tell me about it" / "দেখি" -> get_product_details AND open_product_page for that product, then say one or two key points (price, what it is).
+- "এটা কার্টে দেন" / "add this" / "এইটা নিব" / "অর্ডার করব এটা" -> add_to_cart for the product being talked about (the one just shown, opened or described; "the second one" = second card). If several are on screen and it's unclear which, ask "কোনটা, নাম্বার বলবেন?". After it's added, ask: "কার্টে দিয়েছি। অর্ডার কনফার্ম করবো, নাকি আরো কিছু দেখবেন?"
+- "অর্ডার কনফার্ম করেন" / "checkout" / "place the order" -> collect name, phone number and full delivery address (ask only for what you don't have, one or two at a time; save each with save_customer_profile). Then call propose_order and read the details back in one sentence: name, phone, address and total, and ask "সব ঠিক আছে? অর্ডার কনফার্ম করবো?".
+- They agree ("হ্যাঁ", "জি", "ঠিক আছে", "কনফার্ম", "yes") -> call confirm_order immediately, then tell them the order is placed and they pay on delivery. They want a change -> fix it and propose_order again.
+- Only call request_human when the customer clearly asks to talk to a person. If you can't find something, say so and offer what the store has; don't hand off.
+- Ask for the customer's name only when ordering, not at the start of the call.
+- If you didn't catch something (a detail, a product name), ask them to say it again once ("আরেকবার বলবেন?"). Use collect_contact_details only if a phone number or address is still unclear after that.`;
 
 // What makes a voice sound like a person rather than an AI: everyday spoken words, not written ones.
 const SOUND_HUMAN = `SOUND LIKE A REAL PERSON, NOT AN AI:
@@ -98,14 +110,13 @@ export async function realtimeInstructions(context: SessionContext): Promise<str
   return `${base}\n\n${LIVE_CALL_RULES}\n\n${SOUND_HUMAN}\n\nHOW YOU SOUND: ${realtimeSettings(context.store).style}`;
 }
 
-/** What the assistant says first when the call connects. */
 /**
  * The first thing said on a call: short, fixed, and with no tools (the client sends it with
  * tool_choice "none"), so the call never opens by showing products nobody asked for.
  */
 export function openerInstruction(saved: SavedDetails | null): string {
   const first = saved?.name?.trim().split(/\s+/)[0];
-  const line = first ? `হ্যালো ${first}, আমি শুনছি।` : "হ্যালো, আমি শুনছি।";
+  const line = first ? `হ্যালো ${first}! বলুন, কিভাবে সাহায্য করতে পারি?` : "হ্যালো! বলুন, আপনাকে কিভাবে সাহায্য করতে পারি?";
   return `Say exactly this, warmly, and nothing else: "${line}"`;
 }
 
@@ -150,9 +161,12 @@ export async function createRealtimeSession(context: SessionContext): Promise<Re
         audio: {
           input: {
             // Transcripts are what the chat, the inbox and the AI's memory show.
-            transcription: { model: "gpt-4o-mini-transcribe" },
+            transcription: {
+              model: "gpt-4o-mini-transcribe",
+              prompt: "A customer talking to an online shop assistant in Bangla or English: products, prices, cart, order, delivery, name, phone number, address.",
+            },
             noise_reduction: { type: "near_field" },
-            turn_detection: { type: "semantic_vad", eagerness: "high", create_response: true, interrupt_response: true },
+            turn_detection: { type: "semantic_vad", eagerness: "auto", create_response: true, interrupt_response: true },
           },
           output: { voice: voice.voice, speed: voice.speed },
         },

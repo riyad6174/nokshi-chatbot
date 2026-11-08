@@ -26,8 +26,11 @@ export type RealtimeCallbacks = {
 
 type StartOptions = { lang: VoiceLang; maxSessionMinutes: number };
 
-/** Pause after this long with nobody talking, so the mic isn't left open. */
-const IDLE_PAUSE_MS = 20_000;
+/**
+ * Mute after this long with nobody talking, so the mic isn't left open forever. Long on purpose: a
+ * short timeout muted customers who were looking at products, and their next words were never heard.
+ */
+const IDLE_PAUSE_MS = 3 * 60_000;
 const REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 
 type ServerEvent = { type: string; [key: string]: unknown };
@@ -458,9 +461,10 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
 
         startMeter(mic);
         sessionTimerRef.current = window.setTimeout(() => stopRef.current(), options.maxSessionMinutes * 60_000);
-        setPhase("listening");
-        resetIdleTimer();
-        // The assistant speaks first: greet, and ask the name (or welcome back by name).
+        // Straight from "Connecting…" to the greeting: no "Listening" flash before the assistant
+        // speaks, which looked like the call was connecting twice. It listens once the greeting ends.
+        setPhase("thinking");
+        // The assistant speaks first: "Hello! How can I help you?" (by name when known).
         send({ type: "response.create", response: { instructions: grant.opener, tool_choice: "none" } });
         return true;
       } catch (caught) {
@@ -471,7 +475,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- freshGrant only reads refs
-    [fetchGrant, onServerEvent, prime, resetIdleTimer, send, setPhase, startMeter, teardown],
+    [fetchGrant, onServerEvent, prime, send, setPhase, startMeter, teardown],
   );
 
   // --- controls ------------------------------------------------------------------------------

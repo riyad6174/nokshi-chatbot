@@ -136,7 +136,7 @@ export function computeFacets(products: ProductCardData[], maxPerFacet = 6): Fac
 }
 
 export async function searchProducts(input: ProductSearchInput): Promise<ProductCardData[]> {
-  const limit = Math.min(Math.max(input.limit ?? 6, 1), 12);
+  const limit = Math.min(Math.max(input.limit ?? 6, 1), 24);
   const products = await prisma.product.findMany({
     where: { storeId: input.storeId, status: "active" },
     include: { variants: true },

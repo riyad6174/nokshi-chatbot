@@ -14,7 +14,7 @@ type ProductListProps = {
 };
 
 /** 4 per row on wide screens, 3 rows at most. */
-const GRID_MAX = 12;
+const GRID_MAX = 24;
 
 /**
  * One product: a featured card. Several: numbered tiles ("the second one"), in a grid or in a row

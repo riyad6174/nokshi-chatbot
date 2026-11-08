@@ -242,7 +242,7 @@ export function FloatingActions({
           <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500" aria-hidden="true" />
           {titleFor(part)}
           {part.type === "product_list" && part.products.length > 1 ? (
-            <span className="font-normal text-stone-500">· {Math.min(part.products.length, 12)}</span>
+            <span className="font-normal text-stone-500">· {Math.min(part.products.length, 24)}</span>
           ) : null}
         </p>
         {body(part)}
