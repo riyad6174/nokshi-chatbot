@@ -35,8 +35,11 @@ type SpeechRecognitionLike = {
 
 type StartOptions = { speech: "server" | "browser"; lang: VoiceLang; maxSessionMinutes: number };
 
-/** Pause after this long with nobody talking, so the mic isn't left open. */
-const IDLE_PAUSE_MS = 20_000;
+/**
+ * Pause after this long with nobody talking, so the mic isn't left open forever. Long on purpose: a
+ * short timeout muted customers who were looking at products, and their next words were never heard.
+ */
+const IDLE_PAUSE_MS = 3 * 60_000;
 const MAX_UTTERANCE_MS = 30_000;
 const END_SILENCE_MS = 900;
 const PREROLL_MS = 400;

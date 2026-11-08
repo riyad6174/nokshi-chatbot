@@ -27,7 +27,11 @@ const GENERAL_WORDS = new Set(
     "সব", "সকল", "সবকিছু", "প্রোডাক্ট", "পণ্য", "কি", "কী", "কোন", "জিনিস", "আপনাদের", "আপনার", "কাছে", "আছে",
     "দেখান", "দেখাও", "দেখাবেন", "আমাকে", "কিছু", "বিক্রি", "করেন", "রকম",
     "list", "price", "prices", "the", "a", "of", "and", "are", "there", "can", "i", "is", "available", "browse", "store", "shop",
-    "কি কি", "আর", "এর", "দাম", "লিস্ট", "তালিকা", "দেখি", "দেখতে", "চাই", "সমস্ত", "যা", "যত", "সবগুলো", "সবগুলা", "প্রোডাক্টস", "পন্য",
+    // Bangla written in English letters ("ki ki product ache?", "sob product dekhan").
+    "ki", "kii", "ky", "kon", "konta", "koto", "ache", "achhe", "ase", "asey", "achey", "apnader", "apnar", "tomader",
+    "kache", "sob", "shob", "sobgula", "sobgulo", "dekhan", "dekhao", "dekhaben", "dekhi", "amake", "kichu", "jinish",
+    "bikri", "koren", "rokom", "chai", "dam", "list", "pannya", "ponno",
+    "আর", "এর", "দাম", "লিস্ট", "তালিকা", "দেখি", "দেখতে", "চাই", "সমস্ত", "যা", "যত", "সবগুলো", "সবগুলা", "প্রোডাক্টস", "পন্য",
   ].map((word) => word.normalize("NFC")),
 );
 

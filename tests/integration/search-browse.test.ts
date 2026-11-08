@@ -19,7 +19,7 @@ async function search(args: Record<string, unknown>) {
 
 describe("product search never leaves the customer with nothing", () => {
   it("shows a selection across categories for 'what products do you have?'", async () => {
-    for (const query of ["products", "আপনাদের কাছে কি কি প্রোডাক্ট আছে?", "what do you have"]) {
+    for (const query of ["products", "আপনাদের কাছে কি কি প্রোডাক্ট আছে?", "what do you have", "ki ki product ache?", "sob product dekhan"]) {
       const { content, list } = await search({ query });
       expect(list?.label).toBe("Our products");
       expect(content.count).toBeGreaterThanOrEqual(2);
@@ -30,7 +30,7 @@ describe("product search never leaves the customer with nothing", () => {
   });
 
   it("finds bags however they're asked for", async () => {
-    for (const query of ["bag", "bags", "ব্যাগ", "ব্যাগ দেখান"]) {
+    for (const query of ["bag", "bags", "ব্যাগ", "ব্যাগ দেখান", "bag ache?", "show me bags"]) {
       const { content, list } = await search({ query });
       expect(content.matched).toBe(true);
       expect(list!.products.every((product) => product.category === "Bags")).toBe(true);
@@ -43,5 +43,13 @@ describe("product search never leaves the customer with nothing", () => {
     expect(list).toBeUndefined();
     expect(content.note).toContain("doesn't have that");
     expect(content.storeCategories.sort()).toEqual(["Accessories", "Bags"]);
+  });
+
+  it("keeps a voice call with the assistant unless the customer asks for a person", async () => {
+    const session = await newSession();
+    const quiet = await executeTool({ session, channel: "voice", latestUserText: "tea set ache?" }, "request_human", JSON.stringify({ reason: "Not sure" }));
+    expect(quiet.ok).toBe(false);
+    const asked = await executeTool({ session, channel: "voice", latestUserText: "আমি একজন মানুষের সাথে কথা বলতে চাই" }, "request_human", JSON.stringify({ reason: "Wants a person" }));
+    expect(asked.ok).toBe(true);
   });
 });
