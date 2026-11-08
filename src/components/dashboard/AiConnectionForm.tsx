@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { startTransition, useActionState, useRef, useState } from "react";
 import { saveAiConnectionAction, testAiConnectionAction, type ConnectionTestResult } from "@/app/admin/ai-actions";
 import type { ProviderPreset } from "@/modules/ai/presets";
 
@@ -23,6 +23,7 @@ type Props = {
 };
 
 export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [provider, setProvider] = useState(initial.provider);
   const [baseUrl, setBaseUrl] = useState(initial.baseUrl);
   const [model, setModel] = useState(initial.model);
@@ -53,7 +54,7 @@ export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
         : "No key saved.";
 
   return (
-    <form action={saveAiConnectionAction} className="mt-3 grid gap-3 sm:grid-cols-2">
+    <form ref={formRef} action={saveAiConnectionAction} className="mt-3 grid gap-3 sm:grid-cols-2">
       <div className="sm:col-span-2">
         <label htmlFor="ai-provider" className={labelClass}>
           Provider
@@ -184,8 +185,10 @@ export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
 
       <div className="flex flex-wrap gap-2 sm:col-span-2">
         <button
-          type="submit"
-          formAction={testAction}
+          type="button"
+          // Not a form submission: React resets a form after its action runs, which would put the
+          // provider back to the first option and clear the typed key before Save.
+          onClick={() => formRef.current && startTransition(() => testAction(new FormData(formRef.current!)))}
           disabled={testing}
           className="rounded-lg border border-stone-300 bg-white px-3.5 py-2 text-[11.5px] font-semibold text-stone-800 transition hover:bg-stone-50 disabled:opacity-50"
         >

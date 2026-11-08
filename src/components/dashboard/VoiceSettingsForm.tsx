@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { startTransition, useActionState, useRef } from "react";
 import { saveVoiceSettingsAction, testVoiceConnectionAction, type ConnectionTestResult } from "@/app/admin/ai-actions";
 
 const inputClass =
@@ -28,6 +28,7 @@ type Props = {
 };
 
 export function VoiceSettingsForm({ initial }: Props) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [testResult, testAction, testing] = useActionState<ConnectionTestResult | null, FormData>(testVoiceConnectionAction, null);
   const voices = VOICES.includes(initial.voice) ? VOICES : [initial.voice, ...VOICES];
 
@@ -38,7 +39,7 @@ export function VoiceSettingsForm({ initial }: Props) {
       : "Needed: the AI model above isn't an OpenAI key, and live voice only runs on OpenAI.";
 
   return (
-    <form action={saveVoiceSettingsAction} className="mt-3 grid gap-3 sm:grid-cols-2">
+    <form ref={formRef} action={saveVoiceSettingsAction} className="mt-3 grid gap-3 sm:grid-cols-2">
       <div className="sm:col-span-2">
         <label htmlFor="voice-engine" className={labelClass}>
           Voice engine
@@ -153,8 +154,10 @@ export function VoiceSettingsForm({ initial }: Props) {
 
       <div className="flex flex-wrap gap-2 sm:col-span-2">
         <button
-          type="submit"
-          formAction={testAction}
+          type="button"
+          // Not a form submission: React resets a form after its action runs, which would put the
+          // provider back to the first option and clear the typed key before Save.
+          onClick={() => formRef.current && startTransition(() => testAction(new FormData(formRef.current!)))}
           disabled={testing}
           className="rounded-lg border border-stone-300 bg-white px-3.5 py-2 text-[11.5px] font-semibold text-stone-800 transition hover:bg-stone-50 disabled:opacity-50"
         >
