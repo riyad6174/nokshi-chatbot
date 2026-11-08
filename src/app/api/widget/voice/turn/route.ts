@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { logger } from "@/lib/logging/logger";
-import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { jsonError, jsonOk, sseEvent, sseHeaders, validationError } from "@/lib/http";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { widgetVoiceTurnSchema } from "@/lib/validation/schemas";
@@ -32,13 +32,13 @@ export const dynamic = "force-dynamic";
 // Nothing intelligible heard: 422 no_speech (the client just keeps listening).
 
 export async function POST(request: NextRequest) {
-  const ipRate = checkRateLimit(`voice:ip:${getClientIp(request)}`, 60, 60_000);
+  const ipRate = await rateLimit(`voice:ip:${getClientIp(request)}`, 60, 60_000);
   if (!ipRate.allowed) return jsonError(429, "rate_limited", "Too many messages. Please wait a moment and try again.");
 
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return jsonError(401, "session_required", "Start a chat session before talking to the assistant.");
 
-  const sessionRate = checkRateLimit(`voice:session:${sessionId}`, 20, 60_000);
+  const sessionRate = await rateLimit(`voice:session:${sessionId}`, 20, 60_000);
   if (!sessionRate.allowed) return jsonError(429, "rate_limited", "Too many messages. Please wait a moment and try again.");
 
   let form: FormData;

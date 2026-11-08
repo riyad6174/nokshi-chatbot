@@ -8,7 +8,7 @@ import {
   createAdminToken,
   verifyAdminCredentials,
 } from "@/lib/auth/admin";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { rateLimit } from "@/lib/rate-limit";
 import { adminLoginSchema } from "@/lib/validation/schemas";
 import { logger } from "@/lib/logging/logger";
 
@@ -18,7 +18,7 @@ export async function loginAction(formData: FormData) {
 
   const headerStore = await headers();
   const ip = headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-  const rate = checkRateLimit(`admin-login:${ip}`, 10, 5 * 60_000);
+  const rate = await rateLimit(`admin-login:${ip}`, 10, 5 * 60_000);
   if (!rate.allowed) redirect("/admin/login?error=rate");
 
   const parsed = adminLoginSchema.safeParse({ email, password });

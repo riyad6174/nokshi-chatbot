@@ -60,6 +60,9 @@ type ChatPanelProps = {
   orbState: OrbState;
   confirmingOrder: boolean;
   onConfirmOrder: (confirmationId: string) => void;
+  /** Proactive suggestion buttons: "No thanks" / "Stop suggestions". */
+  onSuggestionAction?: (suggestionId: string, action: "dismiss" | "opt_out") => void;
+  closedSuggestions?: ReadonlySet<string>;
 };
 
 function isOrderPlacedEvent(message: ChatMessage): boolean {
@@ -105,6 +108,8 @@ export function ChatPanel({
   orbState,
   confirmingOrder,
   onConfirmOrder,
+  onSuggestionAction,
+  closedSuggestions,
 }: ChatPanelProps) {
   const [cartOpen, setCartOpen] = useState(false);
   const [celebration, setCelebration] = useState<string | null>(null);
@@ -286,6 +291,8 @@ export function ChatPanel({
             onSuggestion={onSend}
             confirmingOrder={confirmingOrder}
             onConfirmOrder={onConfirmOrder}
+            onSuggestionAction={onSuggestionAction}
+            closedSuggestions={closedSuggestions}
             voiceAvailable={voiceAssistant.available && !voiceAssistant.active && mode === "bot"}
             onStartVoice={voiceAssistant.onStart}
             voiceActive={voiceAssistant.active}

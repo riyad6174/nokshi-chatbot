@@ -42,6 +42,9 @@ type MessageListProps = {
   onStartVoice?: () => void;
   /** Voice mode is on: its stage already shows the orb, so the hero leaves it out. */
   voiceActive?: boolean;
+  onSuggestionAction?: (suggestionId: string, action: "dismiss" | "opt_out") => void;
+  /** Suggestions the customer already answered (their buttons are hidden). */
+  closedSuggestions?: ReadonlySet<string>;
 };
 
 type ActionKind = "products" | "cart" | "checkout" | "delivery" | "order" | "tracking";
@@ -91,9 +94,47 @@ function actionMeta(part: ChatPart): { kind: ActionKind; label: string; detail?:
       return { kind: "tracking", label: part.orders.length === 1 ? "Your order" : "Your orders" };
     case "contact_form":
       return { kind: "delivery", label: "Your details", detail: "Check & send" };
+    case "comparison":
+      return { kind: "products", label: "Comparison", detail: `${part.products.length} products` };
     default:
       return null;
   }
+}
+
+/** Side-by-side catalog facts. Scrolls horizontally on narrow screens. */
+function ComparisonTable({ part }: { part: Extract<ChatPart, { type: "comparison" }> }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[260px] border-collapse text-left text-[11.5px]">
+        <thead>
+          <tr>
+            <th className="py-1 pr-2 font-medium text-stone-400" scope="col">
+              <span className="sr-only">Detail</span>
+            </th>
+            {part.products.map((product) => (
+              <th key={product.id} scope="col" className="py-1 pr-2 font-semibold text-stone-900">
+                {product.name}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {part.rows.map((row) => (
+            <tr key={row.label} className="border-t border-stone-100">
+              <th scope="row" className="py-1 pr-2 font-medium capitalize text-stone-500">
+                {row.label}
+              </th>
+              {row.values.map((value, index) => (
+                <td key={index} className="py-1 pr-2 text-stone-800">
+                  {value}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function ActionCard({
@@ -278,6 +319,8 @@ export function MessageList({
   voiceAvailable = false,
   onStartVoice,
   voiceActive = false,
+  onSuggestionAction,
+  closedSuggestions,
 }: MessageListProps) {
   const hasCustomerMessage = messages.some((message) => message.role === "user");
   const hasAssistantMessage = messages.some((message) => message.role === "assistant");
@@ -381,6 +424,8 @@ export function MessageList({
             ))}
           </div>
         );
+      case "comparison":
+        return <ComparisonTable part={part} />;
       default:
         return null;
     }
@@ -398,6 +443,27 @@ export function MessageList({
           senderName={message.senderName}
         />
       ) : null;
+    }
+    if (part.type === "suggestion_actions") {
+      if (!onSuggestionAction || closedSuggestions?.has(part.suggestionId)) return null;
+      return (
+        <div key={key} className="flex flex-wrap gap-1.5 pl-7" role="group" aria-label="Suggestion options">
+          <button
+            type="button"
+            onClick={() => onSuggestionAction(part.suggestionId, "dismiss")}
+            className="rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-medium text-stone-600 transition hover:bg-stone-50"
+          >
+            No thanks
+          </button>
+          <button
+            type="button"
+            onClick={() => onSuggestionAction(part.suggestionId, "opt_out")}
+            className="rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-medium text-stone-500 transition hover:bg-stone-50"
+          >
+            Stop suggestions
+          </button>
+        </div>
+      );
     }
     if (part.type === "refine_options") {
       return (

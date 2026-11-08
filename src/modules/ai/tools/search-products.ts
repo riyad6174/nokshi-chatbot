@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { computeFacets, searchProducts } from "@/modules/catalog/product.service";
 import { translateShoppingTerms } from "@/modules/catalog/query-terms";
+import { resolveSalesConfig } from "@/modules/sales/config";
+import { trackEvent } from "@/modules/customers/events.service";
+import { semanticProductMatches, semanticSearchEnabled } from "@/modules/search/embeddings.service";
+import { logger } from "@/lib/logging/logger";
 import { productCompact, success } from "@/modules/ai/tools/helpers";
 import type { ToolDefinition } from "@/modules/ai/tools/types";
 import type { ChatPart, ProductCardData } from "@/types/chat";
@@ -79,10 +83,32 @@ export const searchProductsTool: ToolDefinition = {
       });
 
     // Bangla words -> catalog terms, then each recognized term on its own ("ব্যাগ আর জামা").
+    const salesConfig = resolveSalesConfig(ctx.session.store.settings);
+    const synonyms = salesConfig.synonyms;
     let products = await run(input.query, input.category);
+    // Few keyword matches: add semantically close products (natural-language needs, other languages).
+    if (products.length < 3 && input.query && semanticSearchEnabled(salesConfig.features.semanticSearch)) {
+      const semantic = await semanticProductMatches(ctx.session.storeId, input.query, 8).catch((error) => {
+        logger.warn("search.semantic_failed", { error: error instanceof Error ? error.message : String(error) });
+        return [];
+      });
+      if (semantic.length > 0) {
+        products = await searchProducts({
+          storeId: ctx.session.storeId,
+          text: input.query,
+          category: input.category,
+          brand: input.brand,
+          filters: input.filters,
+          minPriceMinor: input.minPriceMinor,
+          maxPriceMinor: input.maxPriceMinor,
+          limit: input.limit ?? 6,
+          semanticScores: new Map(semantic.map((entry) => [entry.id, entry.score])),
+        });
+      }
+    }
     if (products.length === 0) {
-      const translated = translateShoppingTerms(`${input.query ?? ""} ${input.category ?? ""}`);
-      const category = input.category && translateShoppingTerms(input.category) ? undefined : input.category;
+      const translated = translateShoppingTerms(`${input.query ?? ""} ${input.category ?? ""}`, synonyms);
+      const category = input.category && translateShoppingTerms(input.category, synonyms) ? undefined : input.category;
       if (translated) {
         products = await run(translated, category);
         if (products.length === 0) {
@@ -112,6 +138,15 @@ export const searchProductsTool: ToolDefinition = {
       if (general) products = selection;
     }
     const facets = matched && products.length > 1 ? computeFacets(products) : [];
+    if (asked) {
+      await trackEvent({
+        storeId: ctx.session.storeId,
+        sessionId: ctx.session.sessionId,
+        visitorId: ctx.session.visitorId,
+        type: "searched",
+        meta: { query: asked.slice(0, 120), matched, count: matched ? products.length : 0, productIds: matched ? products.map((product) => product.id) : [] },
+      });
+    }
 
     const ui: ChatPart[] = [];
     if (products.length > 0) {

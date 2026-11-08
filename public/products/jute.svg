@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="Jute Market Bag illustration">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f1ead7"/>
+      <stop offset="1" stop-color="#d7c79c"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <circle cx="170" cy="170" r="120" fill="#ffffff" opacity="0.35"/>
+  <ellipse cx="400" cy="690" rx="235" ry="32" fill="#000000" opacity="0.12"/>
+  <path d="M290 330c0-90 50-150 110-150s110 60 110 150" fill="none" stroke="#7a5a2e" stroke-width="22" stroke-linecap="round"/>
+  <path d="M220 310h360l-30 360H250Z" fill="#c7a15e"/>
+  <g stroke="#a8823f" stroke-width="5" opacity="0.7"><path d="M235 380h330"/><path d="M240 450h320"/><path d="M245 520h310"/><path d="M250 590h300"/></g>
+  <rect x="320" y="420" width="160" height="80" rx="10" fill="#2f6f4f"/>
+</svg>

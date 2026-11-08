@@ -21,6 +21,8 @@ orders use transactions, and Atlas clusters already are one.
 
 Until an AI model is connected, a **demo assistant** answers from the same catalog, cart and order tools.
 
+For the implementation details—including the chat-to-Inbox flow, provider/tool orchestration, and what “training” means in this app—see the [AI chatbot guide](./docs/AI-CHATBOT-GUIDE.md).
+
 ## Dashboard
 
 | Page | What it does |
@@ -36,7 +38,8 @@ Until an AI model is connected, a **demo assistant** answers from the same catal
 ### Product auto entry
 Products from the API are written into the **same** product collection the store uses (matched by the API's ID),
 so nothing is stored twice. Each sync updates names, prices and stock. Products missing from the feed are hidden,
-not deleted, because past orders reference them. Syncs run when the site gets traffic. For exact timing in
+not deleted, because past orders reference them. A sync that is due starts in the background when a chat session
+starts or an admin opens **Configure chatbot**, so a store with visitors stays current. For exact timing in
 production, call `GET /api/cron/product-sync` with `Authorization: Bearer $CRON_SECRET` from a scheduler.
 
 ## How a chat flows
@@ -57,7 +60,7 @@ production, call `GET /api/cron/product-sync` with `Authorization: Bearer $CRON_
 
 | Command | Covers |
 |---|---|
-| `npm test` | 91 unit/integration tests on a throwaway in-memory MongoDB: catalog scoping, cart rules, checkout and order placement (including the last-unit race, price changes, double submit), status transitions and stock release, order privacy, handoff rules and takeover, product-page greeting, API sync (create/update/hide/lock/failure), uploads ownership, AI tool loop, key encryption, HTTP routes |
+| `npm test` | Unit/integration tests on a throwaway in-memory MongoDB: catalog scoping, cart rules, checkout and order placement (including the last-unit race, price changes, double submit), status transitions and stock release, order privacy, handoff rules and takeover, product-page greeting, API sync (create/update/hide/lock/failure), uploads ownership, AI tool loop, key encryption, HTTP routes |
 | `npm run test:e2e` | Playwright, desktop and mobile: chat → refine → cart → details in chat → checkout → order → status in chat; topic badges; product-page greeting; human handoff with an agent replying from the Inbox; dashboard pages |
 
 Neither touches your real database. First E2E run: `npx playwright install chromium`.

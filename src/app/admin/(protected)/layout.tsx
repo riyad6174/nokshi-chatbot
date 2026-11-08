@@ -42,7 +42,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       </header>
 
       <div className="mx-auto grid w-full max-w-6xl gap-6 px-5 py-6 sm:px-8 md:grid-cols-[170px_1fr]">
-        <aside className="md:pt-1">
+        <aside className="min-w-0 md:pt-1">
           <AdminNav badges={{ "/admin/inbox": waiting }} />
         </aside>
         <main className="min-w-0">{children}</main>

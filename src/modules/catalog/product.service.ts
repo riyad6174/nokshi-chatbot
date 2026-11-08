@@ -81,6 +81,8 @@ export type ProductSearchInput = {
   filters?: Record<string, string>;
   limit?: number;
   includeUnavailable?: boolean;
+  /** Semantic similarity per product id (0..1) from embeddings; products in it match even without shared words. */
+  semanticScores?: Map<string, number>;
 };
 
 function matchesFilters(product: ProductWithVariants, filters: Record<string, string>): boolean {
@@ -164,11 +166,14 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
           if (product.name.toLowerCase().includes(token)) score += 3;
           else if (haystack.includes(token)) score += 1;
         }
+        const semantic = input.semanticScores?.get(product.id) ?? 0;
         if (score === 0) {
           const allTokensMatch = tokens.every((token) => haystack.includes(token));
-          if (!allTokensMatch) return null;
-          score = 1;
+          if (!allTokensMatch && semantic === 0) return null;
+          score = allTokensMatch ? 1 : 0;
         }
+        // Hybrid ranking: keyword score plus semantic closeness.
+        score += semantic * 12;
       }
 
       if (category && !product.category.toLowerCase().includes(category)) return null;

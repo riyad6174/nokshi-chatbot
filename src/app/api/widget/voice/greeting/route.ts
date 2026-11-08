@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { jsonError, jsonOk, validationError } from "@/lib/http";
 import { speechMode } from "@/modules/speech/config";
 import { greetingText, knownCustomerOpener, synthesizeCached, voiceAssistantEnabled } from "@/modules/speech/greeting";
@@ -22,7 +22,7 @@ const querySchema = z.object({
 
 // Store-configured lines only (never caller-supplied text), so this can't be used as a free TTS service.
 export async function GET(request: NextRequest) {
-  const rate = checkRateLimit(`voice-greeting:${getClientIp(request)}`, 30, 60_000);
+  const rate = await rateLimit(`voice-greeting:${getClientIp(request)}`, 30, 60_000);
   if (!rate.allowed) return jsonError(429, "rate_limited", "Too many requests. Please try again shortly.");
 
   const parsed = querySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams));

@@ -4,7 +4,7 @@ import { readWidgetSessionId } from "@/lib/auth/widget";
 import { prisma } from "@/lib/db/prisma";
 import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
 import { logger } from "@/lib/logging/logger";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { rateLimit } from "@/lib/rate-limit";
 import { executeTool } from "@/modules/ai/tools";
 import { getSessionContext } from "@/modules/conversations/session.service";
 import {
@@ -30,7 +30,7 @@ const bodySchema = z.object({
 export async function POST(request: NextRequest) {
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return jsonError(401, "session_required", "Start a chat session first.");
-  const rate = checkRateLimit(`realtime-tool:${sessionId}`, 60, 60_000);
+  const rate = await rateLimit(`realtime-tool:${sessionId}`, 60, 60_000);
   if (!rate.allowed) return jsonError(429, "rate_limited", "Too many requests. Please wait a moment.");
 
   const parsed = bodySchema.safeParse(await readJson(request));

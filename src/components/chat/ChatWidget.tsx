@@ -34,6 +34,39 @@ import type {
 
 const WIDGET_KEY = process.env.NEXT_PUBLIC_WIDGET_KEY || "demo-widget-key";
 
+// Proactive engagement. Shopper activity is reported to the server, which decides whether the
+// assistant says something. Host sites can report their own activity with:
+//   window.dispatchEvent(new CustomEvent("nokshi:activity", { detail: { type: "add_to_cart", productId } }))
+// (types: product_view, search {query}, compare {productIds}, add_to_cart {productId}, checkout_start).
+const ENGAGEMENT_OFF_KEY = "nokshi:engagement-off";
+const ACTIVITY_TYPES = new Set(["product_view", "search", "compare", "add_to_cart", "checkout_start"]);
+type EngagementTriggerName = "search" | "product_view" | "compare" | "add_to_cart" | "cart_idle" | "checkout_start";
+type EngagementResult = { show: boolean; reason: string; message?: ChatMessage; nudge?: string | null; retryAfterSeconds?: number };
+
+function storageGet(key: string): string | null {
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key: string, value: string) {
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Storage blocked: engagement checks just keep running.
+  }
+}
+
+function storageRemove(key: string) {
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore.
+  }
+}
+
 type ChatWidgetProps = {
   /** Set on product pages: the chat greets with an overview of this product. */
   productId?: string;
@@ -108,6 +141,12 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [unread, setUnread] = useState(0);
+  /** A proactive suggestion shown as a small bubble while the chat is closed. */
+  const [nudge, setNudge] = useState<string | null>(null);
+  const [closedSuggestions, setClosedSuggestions] = useState<ReadonlySet<string>>(() => new Set());
+  const engagementRef = useRef<WidgetSessionResponse["settings"]["engagement"]>(undefined);
+  /** When the customer last chatted: no proactive messages while a conversation is going on. */
+  const lastChatAtRef = useRef(0);
 
   const sessionRef = useRef<WidgetSessionResponse | null>(null);
   const loadingRef = useRef(false);
@@ -152,6 +191,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         const data = body as WidgetSessionResponse;
         storeVisitorId(data.visitorId);
         sessionRef.current = data;
+        engagementRef.current = data.settings.engagement;
+        if (data.settings.engagement?.enabled) storageRemove(ENGAGEMENT_OFF_KEY);
         greetedProductRef.current = productId;
         setSession(data);
         setMessages(data.messages);
@@ -239,10 +280,64 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
 
   // Agent replies and order/handoff events arrive by polling: fast while a human is involved,
   // slow otherwise (order status updates), and only in the background when the chat is closed.
+  // While a human is involved and the chat is open, agent replies are pushed over a server-sent
+  // event stream (about 1 s latency); polling stays as the fallback if the stream can't connect.
+  const [streamFailed, setStreamFailed] = useState(false);
+  useEffect(() => {
+    const human = mode === "human" || mode === "waiting_human";
+    if (!session || !open || !human || streamFailed || typeof EventSource === "undefined") return;
+    let source: EventSource | null = null;
+    let failures = 0;
+    let closed = false;
+    const connect = () => {
+      if (closed) return;
+      const params = new URLSearchParams({ conversationId: session.conversationId });
+      if (lastSeenRef.current) params.set("after", lastSeenRef.current);
+      source = new EventSource(`/api/widget/messages/stream?${params}`);
+      source.addEventListener("messages", (event) => {
+        failures = 0;
+        try {
+          const body = JSON.parse((event as MessageEvent<string>).data) as { messages: ChatMessage[]; mode: ConversationMode; agentName: string | null };
+          setMode(body.mode);
+          setAgentName(body.agentName);
+          if (body.messages.length > 0) {
+            setMessages((current) => {
+              const merged = mergeMessages(current, body.messages);
+              noteLatest(merged);
+              return merged;
+            });
+            for (const message of body.messages) {
+              const cartPart = message.parts.find((part) => part.type === "cart_summary");
+              if (cartPart && cartPart.type === "cart_summary") setCart(cartPart.cart);
+            }
+          }
+        } catch {
+          // Ignore a malformed event.
+        }
+      });
+      source.addEventListener("ping", () => {
+        failures = 0;
+      });
+      // The server ends each stream after ~25 s; reconnect from the latest cursor.
+      source.onerror = () => {
+        source?.close();
+        failures += 1;
+        if (failures >= 3) setStreamFailed(true);
+        else window.setTimeout(connect, 1500);
+      };
+    };
+    connect();
+    return () => {
+      closed = true;
+      source?.close();
+    };
+  }, [session, open, mode, streamFailed, noteLatest]);
+
   useEffect(() => {
     if (!session) return;
     const human = mode === "human" || mode === "waiting_human";
-    const interval = open ? (human ? 3000 : 15000) : human ? 10000 : 0;
+    const streaming = human && open && !streamFailed && typeof EventSource !== "undefined";
+    const interval = streaming ? 0 : open ? (human ? 3000 : 15000) : human ? 10000 : 0;
     if (!interval) return;
     let cancelled = false;
     const poll = () => {
@@ -254,7 +349,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [session, mode, open, fetchNewMessages]);
+  }, [session, mode, open, fetchNewMessages, streamFailed]);
 
   /**
    * Posts one customer turn and renders the streamed reply. Shared by typed messages and voice turns.
@@ -276,6 +371,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
 
       inflightRef.current += 1;
       sendingRef.current = true;
+      lastChatAtRef.current = Date.now();
       setSending(true);
       setError(null);
 
@@ -913,6 +1009,121 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     if (voice.error) setError({ message: voice.error });
   }, [voice.error]);
 
+  /** Seconds to wait before reporting a trigger; null = the store has it off. Unknown (no session yet): a safe default. */
+  const triggerDelay = useCallback((name: EngagementTriggerName): number | null => {
+    const settings = engagementRef.current;
+    if (settings) return settings.enabled ? settings.triggers[name] : null;
+    if (storageGet(ENGAGEMENT_OFF_KEY)) return null;
+    return name === "product_view" ? 20 : name === "cart_idle" ? 300 : 0;
+  }, []);
+
+  const postEngagement = useCallback(
+    async (event: Record<string, unknown>, options: { keepalive?: boolean } = {}): Promise<EngagementResult | null> => {
+      try {
+        const response = await fetch("/api/widget/engagement", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(event),
+          keepalive: options.keepalive,
+        });
+        if (!response.ok) return null;
+        const body = (await response.json()) as EngagementResult;
+        if (body.reason === "disabled") storageSet(ENGAGEMENT_OFF_KEY, "1");
+        if (body.show && body.message) {
+          const message = body.message;
+          setMessages((current) => {
+            const merged = mergeMessages(current, [message]);
+            noteLatest(merged);
+            return merged;
+          });
+          if (!openRef.current) {
+            setUnread((count) => count + 1);
+            if (body.nudge) setNudge(body.nudge);
+          }
+        }
+        return body;
+      } catch {
+        return null;
+      }
+    },
+    [noteLatest],
+  );
+
+  /** Reports a trigger unless the customer is busy chatting; retries once if the server asks to wait. */
+  const reportActivity = useCallback(
+    (name: EngagementTriggerName, event: Record<string, unknown>, isCancelled: () => boolean = () => false) => {
+      if (triggerDelay(name) === null) return;
+      const send = async (tries: number) => {
+        if (isCancelled() || sendingRef.current || Date.now() - lastChatAtRef.current < 60_000) return;
+        const result = await postEngagement(event);
+        if (result?.reason === "wait" && result.retryAfterSeconds && tries < 1 && !isCancelled()) {
+          window.setTimeout(() => void send(tries + 1), result.retryAfterSeconds * 1000 + 500);
+        }
+      };
+      void send(0);
+    },
+    [postEngagement, triggerDelay],
+  );
+
+  // On a product page: after the store's dwell time, the assistant may suggest what goes with it.
+  useEffect(() => {
+    if (!productId) return;
+    const delay = triggerDelay("product_view");
+    if (delay === null) return;
+    const started = Date.now();
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      reportActivity("product_view", { type: "product_view", productId, dwellSeconds: Math.round((Date.now() - started) / 1000) }, () => cancelled);
+    }, Math.max(delay, 3) * 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [productId, reportActivity, triggerDelay]);
+
+  // A cart left alone: one gentle check-in after the store's idle time (the server checks the real idle time).
+  const cartSignature = cart ? `${cart.itemCount}:${cart.subtotalMinor}` : "";
+  useEffect(() => {
+    if (!cartSignature || cartSignature.startsWith("0:")) return;
+    const delay = triggerDelay("cart_idle");
+    if (delay === null) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => reportActivity("cart_idle", { type: "cart_idle" }, () => cancelled), Math.max(delay, 30) * 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [cartSignature, reportActivity, triggerDelay]);
+
+  // Activity reported by the host site (its own search, compare, cart).
+  useEffect(() => {
+    const onActivity = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail;
+      const type = typeof detail?.type === "string" ? detail.type : "";
+      if (!ACTIVITY_TYPES.has(type)) return;
+      reportActivity(type as EngagementTriggerName, type === "product_view" ? { dwellSeconds: 0, ...detail } : detail);
+    };
+    window.addEventListener("nokshi:activity", onActivity);
+    return () => window.removeEventListener("nokshi:activity", onActivity);
+  }, [reportActivity]);
+
+  useEffect(() => {
+    if (open) setNudge(null);
+  }, [open]);
+
+  const onSuggestionAction = useCallback(
+    (suggestionId: string, action: "dismiss" | "opt_out") => {
+      setClosedSuggestions((current) => new Set([...current, suggestionId]));
+      if (action === "opt_out") {
+        engagementRef.current = engagementRef.current ? { ...engagementRef.current, enabled: false } : engagementRef.current;
+        void postEngagement({ type: "opt_out" });
+      } else {
+        void postEngagement({ type: "dismiss", suggestionId });
+      }
+    },
+    [postEngagement],
+  );
+
   const refreshCart = useCallback(async () => {
     try {
       const response = await fetch("/api/widget/cart");
@@ -941,6 +1152,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       if (!response.ok) throw new Error(body?.error?.message || "That item could not be added.");
       setCart(body.cart as CartPayload);
       setToast("Added to cart ✓");
+      // A tap on "Add" isn't a chat message, so the assistant may suggest what goes with it.
+      if (triggerDelay("add_to_cart") !== null) void postEngagement({ type: "add_to_cart", productId: productIdToAdd });
     } catch (caught) {
       setError({
         message: errorMessage(caught, "That item could not be added."),
@@ -948,7 +1161,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     } finally {
       setBusyProductId(null);
     }
-  }, []);
+  }, [postEngagement, triggerDelay]);
 
   const removeCartItem = useCallback(async (itemId: string) => {
     if (!sessionRef.current) return;
@@ -1025,6 +1238,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         }
         const url = new URL(body.checkoutUrl as string, window.location.href);
         if (!["http:", "https:"].includes(url.protocol)) throw new Error("The checkout link was not valid. Nothing was charged.");
+        // Lets the engagement engine stay quiet from here on (sent even as the page changes).
+        void postEngagement({ type: "checkout_start" }, { keepalive: true });
         window.location.assign(url.toString());
       } catch (caught) {
         setError({
@@ -1034,7 +1249,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         setCheckoutBusy(false);
       }
     },
-    [cart, refreshCart],
+    [cart, refreshCart, postEngagement],
   );
 
   const accent = session?.settings.theme.accent || "#0f766e";
@@ -1064,7 +1279,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     <>
       <WelcomeBubble
         widgetKey={WIDGET_KEY}
-        suppressed={open || voiceSession.active}
+        suppressed={open || voiceSession.active || Boolean(nudge)}
         accent={accent}
         position={position}
         onSpeakingChange={setWelcomeSpeaking}
@@ -1163,6 +1378,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         orbState={headerOrbState}
         confirmingOrder={confirmingOrder}
         onConfirmOrder={(confirmationId) => void confirmOrder(confirmationId)}
+        onSuggestionAction={onSuggestionAction}
+        closedSuggestions={closedSuggestions}
         voiceAssistant={{
           available: Boolean(voiceSpeech),
           active: voiceSession.active,
@@ -1183,6 +1400,37 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           onResume={voiceSession.resume}
           onStop={voiceSession.stop}
         />
+      ) : null}
+
+      {nudge && !open ? (
+        <div
+          role="status"
+          className={`fixed bottom-[88px] z-[61] flex max-w-[min(300px,calc(100vw-32px))] animate-pop items-start gap-2 rounded-2xl border border-stone-200 bg-white px-3.5 py-2.5 text-[12.5px] text-stone-800 shadow-xl ${
+            position === "left" ? "left-4" : "right-4"
+          }`}
+        >
+          <button
+            type="button"
+            className="text-left"
+            onClick={() => {
+              setNudge(null);
+              setView("chat");
+              setOpen(true);
+            }}
+          >
+            {nudge}
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss suggestion"
+            onClick={() => setNudge(null)}
+            className="-mr-1 shrink-0 rounded-full p-0.5 text-stone-400 hover:text-stone-700"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       ) : null}
 
       <button

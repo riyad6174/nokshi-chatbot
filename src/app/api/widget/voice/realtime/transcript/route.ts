@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { rateLimit } from "@/lib/rate-limit";
 import { appendMessage, toChatMessage } from "@/modules/conversations/conversation.service";
 import { recordTurnOutcome } from "@/modules/conversations/handoff.service";
 import { getSessionContext } from "@/modules/conversations/session.service";
@@ -27,7 +27,7 @@ const bodySchema = z.object({
 export async function POST(request: NextRequest) {
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return jsonError(401, "session_required", "Start a chat session first.");
-  const rate = checkRateLimit(`realtime-transcript:${sessionId}`, 120, 60_000);
+  const rate = await rateLimit(`realtime-transcript:${sessionId}`, 120, 60_000);
   if (!rate.allowed) return jsonError(429, "rate_limited", "Too many requests. Please wait a moment.");
 
   const parsed = bodySchema.safeParse(await readJson(request));

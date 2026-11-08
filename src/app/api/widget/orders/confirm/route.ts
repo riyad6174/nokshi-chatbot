@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { logger } from "@/lib/logging/logger";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { rateLimit } from "@/lib/rate-limit";
 import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { getCartSummary } from "@/modules/cart/cart.service";
@@ -32,7 +32,7 @@ function spokenAmount(minor: number, currency: string, lang: "en" | "bn"): strin
 export async function POST(request: NextRequest) {
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return jsonError(401, "session_required", "Start a chat session first.");
-  const rate = checkRateLimit(`order-confirm:${sessionId}`, 10, 60_000);
+  const rate = await rateLimit(`order-confirm:${sessionId}`, 10, 60_000);
   if (!rate.allowed) return jsonError(429, "rate_limited", "Please wait a moment and try again.");
 
   const parsed = bodySchema.safeParse(await readJson(request));

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { jsonError, readJson, sseEvent, sseHeaders, validationError } from "@/lib/http";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { widgetMessageRequestSchema } from "@/lib/validation/schemas";
@@ -16,13 +16,13 @@ export const dynamic = "force-dynamic";
 // · message.completed {messageId, userMessage} · message.error {message, retryable}
 
 export async function POST(request: NextRequest) {
-  const ipRate = checkRateLimit(`message:ip:${getClientIp(request)}`, 60, 60_000);
+  const ipRate = await rateLimit(`message:ip:${getClientIp(request)}`, 60, 60_000);
   if (!ipRate.allowed) return jsonError(429, "rate_limited", "Too many messages. Please wait a moment and try again.");
 
   const sessionId = readWidgetSessionId(request);
   if (!sessionId) return jsonError(401, "session_required", "Start a chat session before sending a message.");
 
-  const sessionRate = checkRateLimit(`message:session:${sessionId}`, 20, 60_000);
+  const sessionRate = await rateLimit(`message:session:${sessionId}`, 20, 60_000);
   if (!sessionRate.allowed) return jsonError(429, "rate_limited", "Too many messages. Please wait a moment and try again.");
 
   const body = await readJson(request);
