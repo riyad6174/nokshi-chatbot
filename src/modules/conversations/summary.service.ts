@@ -42,29 +42,79 @@ export function summarizeRows(rows: Row[]): string {
   return lines.join("\n");
 }
 
+export type ConversationSummaryCache = {
+  contextSummary: string | null;
+  contextSummaryCutoff: Date | null;
+  contextSummaryUpdatedAt: Date | null;
+};
+
 /**
  * Summary of the messages older than the latest `windowSize` (the ones the model no longer sees),
  * or "" when the history window already covers the whole conversation.
  */
 export async function summarizeEarlierMessages(conversationId: string, windowSize = 20): Promise<string> {
   if (!isObjectId(conversationId)) return "";
-  const total = await prisma.message.count({ where: { conversationId, role: { in: ["user", "assistant", "agent"] } } });
-  if (total <= windowSize) return "";
+  // One more than the window tells whether anything falls outside it (no separate count).
   const recent = await prisma.message.findMany({
     where: { conversationId, role: { in: ["user", "assistant", "agent"] } },
     orderBy: { createdAt: "desc" },
-    take: windowSize,
+    take: windowSize + 1,
     select: { createdAt: true },
   });
-  const cutoff = recent[recent.length - 1]?.createdAt;
+  if (recent.length <= windowSize) return "";
+  const cutoff = recent[windowSize - 1]?.createdAt;
   if (!cutoff) return "";
-  const older = await prisma.message.findMany({
-    where: { conversationId, createdAt: { lt: cutoff } },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-    select: { role: true, content: true, structuredContent: true, createdAt: true },
-  });
-  return summarizeRows(older.reverse());
+  return summarizeBeforeCutoff(conversationId, cutoff, null);
+}
+
+const MAX_SUMMARY_CHARS = 4_000;
+
+/**
+ * Summarizes messages before the given cutoff, extending the stored summary instead of rereading
+ * the whole conversation each turn. The cutoff is the oldest message still sent to the model.
+ */
+export async function summarizeBeforeCutoff(
+  conversationId: string,
+  cutoff: Date | null,
+  cache: ConversationSummaryCache | null,
+): Promise<string> {
+  if (!isObjectId(conversationId) || !cutoff) return "";
+  const cached = cache?.contextSummary?.trim() ?? "";
+  const cachedCutoff = cache?.contextSummaryCutoff ?? null;
+  if (cached && cachedCutoff && cachedCutoff.getTime() >= cutoff.getTime()) return cached;
+
+  let summary = cached;
+  if (cached && cachedCutoff) {
+    const delta = await prisma.message.findMany({
+      where: { conversationId, createdAt: { gte: cachedCutoff, lt: cutoff } },
+      orderBy: { createdAt: "asc" },
+      take: 200,
+      select: { role: true, content: true, structuredContent: true, createdAt: true },
+    });
+    const deltaSummary = summarizeRows(delta);
+    if (deltaSummary) summary = [summary, deltaSummary].filter(Boolean).join("\n");
+  } else {
+    const older = await prisma.message.findMany({
+      where: { conversationId, createdAt: { lt: cutoff } },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: { role: true, content: true, structuredContent: true, createdAt: true },
+    });
+    summary = summarizeRows(older.reverse());
+  }
+
+  const next = summary.length > MAX_SUMMARY_CHARS ? summary.slice(-MAX_SUMMARY_CHARS) : summary;
+  await prisma.conversation
+    .update({
+      where: { id: conversationId },
+      data: {
+        contextSummary: next || null,
+        contextSummaryCutoff: cutoff,
+        contextSummaryUpdatedAt: new Date(),
+      },
+    })
+    .catch(() => undefined);
+  return next;
 }
 
 /** A digest of the whole conversation for agents (Inbox) and handoff notes. */

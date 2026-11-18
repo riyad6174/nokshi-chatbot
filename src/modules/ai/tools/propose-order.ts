@@ -33,7 +33,7 @@ const FIELD_LABELS: Record<string, string> = { name: "name", phone: "phone numbe
 export const proposeOrderTool: ToolDefinition = {
   name: "propose_order",
   description:
-    "Show the order summary card (cash on delivery) for the customer's single, final confirmation. Pass the details the customer gave in this conversation; anything you leave out is filled from their saved details. If something is still missing, the result lists it: ask for just that. Does NOT place the order: when they agree, call confirm_order.",
+    "Show the cash-on-delivery order summary for the customer's final confirmation. Pass details they gave in this conversation; omitted ones come from saved details, and anything still missing is listed in the result (ask for just that). Does NOT place the order: when they agree, call confirm_order.",
   parameters: {
     type: "object",
     additionalProperties: false,

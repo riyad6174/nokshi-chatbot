@@ -8,6 +8,7 @@ import {
   type ProviderTool,
   type ProviderToolCall,
 } from "@/modules/ai/provider";
+import { normalizeAnthropicUsage } from "@/modules/ai/usage";
 
 // Models that accept server-side refusal fallback in its "default" form on the Claude API.
 // Claude Haiku 5.5 has no server-side fallback, so it is deliberately absent.
@@ -152,10 +153,18 @@ export async function* streamAnthropic(input: {
     throw error;
   }
 
+  const usage = normalizeAnthropicUsage(message.usage);
+  const metadata = {
+    ...(usage ? { usage, rawUsage: message.usage } : {}),
+    providerId: input.config.providerId,
+    model: input.config.model,
+    providerRequestId: message.id,
+  };
+
   if (message.stop_reason === "refusal") {
     // The whole fallback chain declined. Never run tools from a refused turn.
     logger.warn("ai.refusal", { model: message.model, category: message.stop_details?.category ?? null });
-    yield { type: "done", finishReason: "refusal", toolCalls: [], raw: message.content };
+    yield { type: "done", finishReason: "refusal", toolCalls: [], raw: message.content, ...metadata };
     return;
   }
 
@@ -172,7 +181,7 @@ export async function* streamAnthropic(input: {
     throw new ProviderError("The AI reply was cut off before a tool call finished.");
   }
 
-  yield { type: "done", finishReason: message.stop_reason, toolCalls, raw: message.content };
+  yield { type: "done", finishReason: message.stop_reason, toolCalls, raw: message.content, ...metadata };
 }
 
 /** Cheap credential + model check: no tokens are generated. */

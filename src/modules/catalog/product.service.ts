@@ -135,19 +135,70 @@ export function computeFacets(products: ProductCardData[], maxPerFacet = 6): Fac
     .slice(0, 4);
 }
 
+/** A search word and its singular ("bags" also finds "bag", "watches" finds "watch"). */
+export function termForms(token: string): string[] {
+  if (token.length > 4 && /(ches|shes|xes|sses)$/.test(token)) return [token, token.slice(0, -2)];
+  if (token.length > 3 && token.endsWith("s") && !token.endsWith("ss")) return [token, token.slice(0, -1)];
+  return [token];
+}
+
+/** True when the two words differ by at most one inserted, removed, swapped-for or transposed letter. */
+export function withinOneEdit(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  if (a.length === b.length) {
+    // One substitution, or two neighbouring letters swapped.
+    if (a.slice(i + 1) === b.slice(i + 1)) return true;
+    return a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2);
+  }
+  const [longer, shorter] = a.length > b.length ? [a, b] : [b, a];
+  return longer.slice(i + 1) === shorter.slice(i);
+}
+
+// The active catalog per store, kept briefly in memory: one product search can scan it several times
+// (browse, synonyms, one term at a time) and every chat turn searches. Product and stock writes clear
+// it (invalidateCatalog); the short lifetime covers other instances and anything not hooked up.
+const catalogCache = new Map<string, { at: number; products: Promise<ProductWithVariants[]> }>();
+
+function catalogTtlMs(): number {
+  const configured = Number(process.env.CATALOG_CACHE_TTL_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 30_000;
+}
+
+/** All active products of a store with their variants, by name. */
+export function loadActiveCatalog(storeId: string): Promise<ProductWithVariants[]> {
+  const query = () =>
+    prisma.product.findMany({ where: { storeId, status: "active" }, include: { variants: true }, orderBy: { name: "asc" } });
+  const ttl = catalogTtlMs();
+  if (ttl === 0) return query();
+  const cached = catalogCache.get(storeId);
+  if (cached && Date.now() - cached.at < ttl) return cached.products;
+  const products = query().catch((error) => {
+    catalogCache.delete(storeId);
+    throw error;
+  });
+  catalogCache.set(storeId, { at: Date.now(), products });
+  return products;
+}
+
+/** Forget the cached catalog after products, variants or stock change (all stores when no id). */
+export function invalidateCatalog(storeId?: string) {
+  if (storeId) catalogCache.delete(storeId);
+  else catalogCache.clear();
+}
+
 export async function searchProducts(input: ProductSearchInput): Promise<ProductCardData[]> {
   const limit = Math.min(Math.max(input.limit ?? 6, 1), 24);
-  const products = await prisma.product.findMany({
-    where: { storeId: input.storeId, status: "active" },
-    include: { variants: true },
-    orderBy: { name: "asc" },
-  });
+  const products = await loadActiveCatalog(input.storeId);
 
   const query = input.text?.trim().toLowerCase() ?? "";
   const tokens = query.split(/\s+/).filter((token) => token.length > 1);
   const category = input.category?.trim().toLowerCase() ?? "";
 
-  const scored = products
+  // Typo matching only when nothing matched as written: "shirt" must not also bring up "short".
+  const rank = (fuzzy: boolean) => products
     .map((product) => {
       const price = effectivePriceMinor(product);
       const attributesText = product.attributes.toLowerCase();
@@ -162,13 +213,20 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
         else if (product.category.toLowerCase().includes(query)) score += 4;
         if (attributesText.includes(query)) score += 3;
         if (product.description.toLowerCase().includes(query)) score += 3;
-        for (const token of tokens) {
-          if (product.name.toLowerCase().includes(token)) score += 3;
-          else if (haystack.includes(token)) score += 1;
-        }
+        const name = product.name.toLowerCase();
+        const nameWords = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+        const tokenFound = tokens.map((token) => {
+          const forms = termForms(token);
+          if (forms.some((form) => name.includes(form))) return 3;
+          if (forms.some((form) => haystack.includes(form))) return 1;
+          // A typo in a product name ("backpak", "scraf").
+          if (fuzzy && token.length >= 5 && nameWords.some((word) => withinOneEdit(word, token))) return 2;
+          return 0;
+        });
+        for (const found of tokenFound) score += found;
         const semantic = input.semanticScores?.get(product.id) ?? 0;
         if (score === 0) {
-          const allTokensMatch = tokens.every((token) => haystack.includes(token));
+          const allTokensMatch = tokenFound.every((found) => found > 0);
           if (!allTokensMatch && semantic === 0) return null;
           score = allTokensMatch ? 1 : 0;
         }
@@ -193,7 +251,8 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
     .slice(0, limit)
     .map((entry) => serializeProduct(entry.product));
 
-  return scored;
+  const exact = rank(false);
+  return exact.length > 0 || tokens.length === 0 ? exact : rank(true);
 }
 
 export async function getProductById(storeId: string, productId: string): Promise<ProductCardData | null> {

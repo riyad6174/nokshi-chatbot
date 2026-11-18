@@ -9,19 +9,32 @@ export type KnowledgeFormValues = {
   status: string;
 };
 
+export type KnowledgeQuestionLink = {
+  id: string;
+  question: string;
+};
+
 type KnowledgeFormProps = {
   action: (formData: FormData) => void | Promise<void>;
   values?: KnowledgeFormValues;
   submitLabel: string;
+  question?: KnowledgeQuestionLink | null;
 };
 
 const inputClass =
   "mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-[13px] text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:outline-none";
 
-export function KnowledgeForm({ action, values, submitLabel }: KnowledgeFormProps) {
+export function KnowledgeForm({ action, values, submitLabel, question }: KnowledgeFormProps) {
   return (
     <form action={action} className="space-y-4">
       {values?.id ? <input type="hidden" name="id" value={values.id} /> : null}
+      {question ? <input type="hidden" name="questionId" value={question.id} /> : null}
+
+      {question ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-900">
+          Answering a customer question: “{question.question}”
+        </div>
+      ) : null}
 
       <div>
         <label htmlFor="knowledge-title" className="text-[11.5px] font-semibold text-stone-700">

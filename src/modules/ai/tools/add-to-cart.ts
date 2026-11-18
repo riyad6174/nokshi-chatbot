@@ -2,7 +2,7 @@ import { z } from "zod";
 import { addItem } from "@/modules/cart/cart.service";
 import { prisma } from "@/lib/db/prisma";
 import { isObjectId } from "@/lib/db/ids";
-import { cartCompact, cartErrorToResult, failure, productIdByName, success } from "@/modules/ai/tools/helpers";
+import { cartCompact, cartErrorToResult, failure, productIdAtPosition, productIdByName, success } from "@/modules/ai/tools/helpers";
 import type { ToolDefinition } from "@/modules/ai/tools/types";
 
 const schema = z.object({
@@ -12,6 +12,8 @@ const schema = z.object({
   variantId: z.string().min(1).max(100).nullish(),
   // The version by name ("Silver / Tan", "Black"): safer than copying a long id.
   variant: z.string().trim().min(1).max(100).nullish(),
+  // "The second one": its number in the latest product list on screen.
+  position: z.number().int().min(1).max(24).optional(),
   quantity: z.number().int().min(1).max(99).default(1),
 });
 
@@ -29,16 +31,17 @@ async function variantIdByTitle(productId: string, title: string): Promise<strin
 export const addToCartTool: ToolDefinition = {
   name: "add_to_cart",
   description:
-    "Add a product to the cart. Use the productId from search results. For the version, pass `variant` with its name exactly as listed (e.g. \"Silver / Tan leather\") or the variantId; leave both out when only one version is in stock and it is picked automatically. Ask which version only if several are in stock. If it fails with variant_unavailable, only that version is sold out: never tell the customer the product is out of stock; add the available version they discussed instead.",
+    "Add a product to the cart (by productId, name as shown, or position on screen). Pass `variant` by its listed name (or variantId); omit it when only one version is in stock. Ask which version only if several are. Error variant_unavailable means only that version is sold out: never say the product is out of stock; add the available version they discussed instead.",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {
-      productId: { type: "string", description: "productId from search results or from the [On screen ...] notes in the conversation." },
-      product: { type: "string", description: "Product name exactly as shown, e.g. \"Urban Trek Backpack\" (used if the id is missing or wrong)." },
-      variant: { type: "string", description: "Version name as listed, e.g. \"Silver / Tan leather\" (preferred over variantId)." },
-      variantId: { type: "string", description: "Variant id from search results (alternative to `variant`)." },
-      quantity: { type: "integer", minimum: 1, maximum: 99, description: "Units to add (default 1)." },
+      productId: { type: "string", description: "From search results or [On screen ...] notes." },
+      product: { type: "string", description: "Name as shown, e.g. \"Urban Trek Backpack\" (used if the id is missing or wrong)." },
+      variant: { type: "string", description: "Version name as listed, e.g. \"Silver / Tan leather\"." },
+      variantId: { type: "string" },
+      position: { type: "integer", minimum: 1, maximum: 24, description: "Number in the latest product list on screen (\"the second one\" = 2), instead of productId/product." },
+      quantity: { type: "integer", minimum: 1, maximum: 99, description: "Default 1." },
     },
   },
   schema,
@@ -46,6 +49,12 @@ export const addToCartTool: ToolDefinition = {
     const input = schema.parse(args);
     // A wrong or missing id with a product name: find it by name (ids are easy to mis-copy).
     let productId = input.productId ?? "";
+    // Picked by number: the list on screen decides, not an id the model may have mixed up.
+    if (input.position) {
+      const atPosition = await productIdAtPosition(ctx.session.conversationId, input.position);
+      if (!atPosition) return failure("position_not_found", `There is no product number ${input.position} on screen. Ask which product they mean.`);
+      productId = atPosition;
+    }
     const known = isObjectId(productId)
       ? await prisma.product.findFirst({ where: { id: productId, storeId: ctx.session.storeId, status: "active" }, select: { id: true } })
       : null;

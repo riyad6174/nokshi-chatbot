@@ -22,6 +22,7 @@ export const getOrderStatusTool: ToolDefinition = {
     },
   },
   schema,
+  parallelSafe: true,
   async execute(ctx, args) {
     const input = schema.parse(args);
     const { orders, verified } = await findOrdersForCustomer({

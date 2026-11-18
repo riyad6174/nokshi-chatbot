@@ -117,7 +117,7 @@ test("dashboard: configure chatbot tabs and AI model test without saving", async
   await admin.getByRole("navigation", { name: "Admin" }).getByRole("link", { name: "AI model" }).click();
   await expect(admin.getByText("Demo mode")).toBeVisible();
   await admin.getByLabel("Provider").selectOption("anthropic");
-  await expect(admin.getByLabel("Model")).toHaveValue("claude-opus-5-5");
+  await expect(admin.getByLabel("Model", { exact: true })).toHaveValue("claude-opus-5-5");
   await admin.getByRole("button", { name: "Test connection" }).click();
   await expect(admin.getByRole("status")).toHaveText(/Enter an API key/);
   await admin.context().close();

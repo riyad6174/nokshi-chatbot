@@ -42,6 +42,12 @@ model Store {
   events        CustomerEvent[]
   jobs          Job[]
   aiTurns       AiTurnLog[]
+  aiUsageEvents AiUsageEvent[]
+  conversationUsageSummaries ConversationUsageSummary[]
+  unansweredQuestions UnansweredQuestion[]
+  knowledgeVersions KnowledgeEntryVersion[]
+  answerCacheEntries AnswerCacheEntry[]
+  promptVersions PromptVersion[]
   campaigns     MarketingCampaign[]
   marketingMessages MarketingMessage[]
 
@@ -93,6 +99,9 @@ model ChatbotSettings {
   // AI Sales & Engagement configuration (JSON, validated by src/modules/sales/config.ts). Empty uses the
   // "general" industry preset, so existing stores keep their current behaviour.
   salesConfig           String?
+  // Cost controls. Optional so settings documents created before this feature stay valid.
+  answerCacheEnabled       Boolean? @default(false)
+  knowledgeLearningEnabled Boolean? @default(true)
   attachmentsEnabled Boolean  @default(true)
   enabledFeatures    String   @default("[\"product_cards\",\"cart_tools\",\"knowledge_search\",\"orders\"]")
   widgetTheme        String   @default("{}")
@@ -198,10 +207,21 @@ model KnowledgeDocument {
   contentHash     String
   embedding       Float[]
   embeddingHash   String?
+  // Admin learning metadata. Optional so documents created before this feature stay valid.
+  category         String?
+  keywords         String?
+  relatedQuestions String?
+  locale           String?
+  priority         Int?
+  version          Int?
+  publishedAt      DateTime?
+  lastReviewedAt   DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  store    Store                  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  versions KnowledgeEntryVersion[]
+  cacheEntries AnswerCacheEntry[]
 
   @@unique([storeId, title])
   @@index([storeId, status])
@@ -241,12 +261,19 @@ model Conversation {
   customerPhone    String    @default("")
   contextProductId String?   @db.ObjectId
   lastMessageAt    DateTime  @default(now())
+  // Cached deterministic summary of messages outside the model's recent history window.
+  contextSummary          String?
+  contextSummaryCutoff    DateTime?
+  contextSummaryUpdatedAt DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  store    Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  session  ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  messages Message[]
+  store        Store                      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  session      ChatSession                @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  aiUsageEvents AiUsageEvent[]
+  usageSummary  ConversationUsageSummary?
+  unansweredQuestions UnansweredQuestion[]
 
   @@index([storeId, status, lastMessageAt])
   @@index([sessionId])
@@ -546,8 +573,19 @@ model AiTurnLog {
   // text | voice
   channel        String
   // live | demo
-  mode           String
+  mode           String          @default("live")
   model          String          @default("")
+  // Usage roll-up for this turn. Optional so older turn logs stay valid.
+  provider              String?
+  inputTokens           Int?
+  outputTokens          Int?
+  cachedInputTokens     Int?
+  cacheWriteInputTokens Int?
+  reasoningTokens       Int?
+  totalTokens           Int?
+  costMicros            Int?
+  pricingStatus         String?
+  usageEventCount       Int?
   // answered | missed | error | handoff
   outcome        String
   latencyMs      Int
@@ -617,4 +655,211 @@ model MarketingMessage {
 
   @@unique([campaignId, profileId, dedupeKey])
   @@index([storeId, status, createdAt])
+}
+
+/// One provider response's normalized token usage. This is the raw ledger; cost is derived from
+/// ModelPricing at write time and the pricing snapshot is stored alongside it.
+model AiUsageEvent {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  storeId               String   @db.ObjectId
+  conversationId        String?  @db.ObjectId
+  sessionId             String?  @db.ObjectId
+  turnLogId             String?  @db.ObjectId
+  messageId             String?  @db.ObjectId
+  // Stable idempotency key for retries (e.g. turn id + round, or realtime response id).
+  eventKey              String   @unique
+  // text | voice
+  channel               String   @default("text")
+  // chat | realtime | embedding | other
+  source                String   @default("chat")
+  // live | demo
+  mode                  String   @default("live")
+  providerId            String   @default("")
+  model                 String   @default("")
+  // chat_round | realtime_response | embedding
+  requestKind           String   @default("chat_round")
+  // Uncached input tokens. Cached reads and writes are tracked separately so they are not
+  // double-counted against the normal input rate.
+  inputTokens           Int      @default(0)
+  outputTokens          Int      @default(0)
+  cachedInputTokens     Int      @default(0)
+  cacheWriteInputTokens Int      @default(0)
+  // A subset of output tokens, kept for visibility and not added again to cost.
+  reasoningTokens       Int      @default(0)
+  totalTokens           Int      @default(0)
+  // Integer USD micros. Null when no active pricing matched.
+  costMicros            Int?
+  // priced | unpriced
+  pricingStatus         String   @default("unpriced")
+  pricingVersion        String   @default("")
+  rawUsage              String   @default("{}")
+  at                    DateTime @default(now())
+
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, at])
+  @@index([storeId, conversationId, at])
+  @@index([storeId, providerId, model, at])
+  @@index([storeId, channel, at])
+}
+
+/// Denormalized totals for fast conversation list/detail reads. AiUsageEvent remains the source of
+/// truth; this can be rebuilt from it if needed.
+model ConversationUsageSummary {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  storeId               String   @db.ObjectId
+  conversationId        String   @unique @db.ObjectId
+  inputTokens           Int      @default(0)
+  outputTokens          Int      @default(0)
+  cachedInputTokens     Int      @default(0)
+  cacheWriteInputTokens Int      @default(0)
+  reasoningTokens       Int      @default(0)
+  totalTokens           Int      @default(0)
+  costMicros            Int      @default(0)
+  pricedEventCount      Int      @default(0)
+  unpricedEventCount    Int      @default(0)
+  eventCount            Int      @default(0)
+  firstEventAt          DateTime?
+  lastEventAt           DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, lastEventAt])
+}
+
+/// Admin-managed USD pricing. Rates are dollars per one million tokens. A missing model is shown
+/// as unpriced; the app never invents rates.
+model ModelPricing {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  providerId            String
+  model                 String
+  currency              String   @default("USD")
+  inputPerMillion       Float    @default(0)
+  cachedInputPerMillion Float    @default(0)
+  cacheWritePerMillion  Float    @default(0)
+  outputPerMillion      Float    @default(0)
+  reasoningPerMillion   Float?
+  // Audio rates (OpenAI Realtime bills audio tokens far above text). Null: audio uses the text rates.
+  audioInputPerMillion       Float?
+  cachedAudioInputPerMillion Float?
+  audioOutputPerMillion      Float?
+  active                Boolean  @default(true)
+  note                  String   @default("")
+  effectiveFrom         DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([providerId, model])
+  @@index([providerId, active])
+}
+
+/// A customer question the assistant could not answer, for the admin teaching workflow.
+model UnansweredQuestion {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  storeId               String   @db.ObjectId
+  conversationId        String?  @db.ObjectId
+  messageId             String?  @db.ObjectId
+  question              String
+  normalizedQuestion    String
+  questionHash          String
+  language              String   @default("")
+  channel               String   @default("text")
+  intent                String   @default("")
+  // answered | missed | error | handoff
+  outcome               String   @default("missed")
+  reason                String   @default("")
+  // new | reviewing | answered | ignored
+  status                String   @default("new")
+  occurrences           Int      @default(1)
+  firstAskedAt          DateTime @default(now())
+  lastAskedAt           DateTime @default(now())
+  resolvedKnowledgeId   String?  @db.ObjectId
+  resolutionNotes       String   @default("")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@unique([storeId, questionHash])
+  @@index([storeId, status, lastAskedAt])
+}
+
+/// Immutable snapshot of a knowledge document at a version. The live document remains the source
+/// for retrieval until a draft is published.
+model KnowledgeEntryVersion {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  storeId             String    @db.ObjectId
+  knowledgeDocumentId String    @db.ObjectId
+  version             Int
+  title               String
+  content             String
+  contentHash         String
+  category            String?
+  keywords            String    @default("[]")
+  relatedQuestions    String    @default("[]")
+  locale              String?
+  sourceType          String    @default("manual")
+  sourceReference     String?
+  // draft | published | archived
+  status              String    @default("draft")
+  createdBy           String    @default("")
+  createdAt           DateTime  @default(now())
+  publishedAt         DateTime?
+
+  store             Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  knowledgeDocument KnowledgeDocument @relation(fields: [knowledgeDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([knowledgeDocumentId, version])
+  @@index([storeId, status, createdAt])
+}
+
+/// Reusable answers grounded only in published knowledge. Feature-flagged off by default.
+model AnswerCacheEntry {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  storeId             String    @db.ObjectId
+  knowledgeDocumentId String    @db.ObjectId
+  knowledgeVersion    Int?
+  questionHash        String
+  normalizedQuestion  String
+  question            String
+  answer              String
+  locale              String    @default("")
+  embedding           Float[]
+  embeddingHash       String?
+  hitCount            Int       @default(0)
+  lastUsedAt          DateTime?
+  expiresAt           DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  store             Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  knowledgeDocument KnowledgeDocument @relation(fields: [knowledgeDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, questionHash])
+  @@index([storeId, locale])
+}
+
+/// Version history for store-level prompt overrides. Core safety rules remain in code and are not
+/// editable from the admin UI.
+model PromptVersion {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  storeId     String    @db.ObjectId
+  key         String    @default("system_instructions")
+  version     Int
+  content     String
+  // draft | published | archived
+  status      String    @default("published")
+  createdBy   String    @default("")
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, key, version])
+  @@index([storeId, key, status])
 }

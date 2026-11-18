@@ -32,6 +32,7 @@ export const dynamic = "force-dynamic";
 // Nothing intelligible heard: 422 no_speech (the client just keeps listening).
 
 export async function POST(request: NextRequest) {
+  const requestStartedAt = Date.now();
   const ipRate = await rateLimit(`voice:ip:${getClientIp(request)}`, 60, 60_000);
   if (!ipRate.allowed) return jsonError(429, "rate_limited", "Too many messages. Please wait a moment and try again.");
 
@@ -140,7 +141,8 @@ export async function POST(request: NextRequest) {
     }
   }
   const userMessage = await appendMessage({ conversationId: conversation.id, role: "user", content: userText, attachments });
-  await trackEvent({
+  // Reporting only (it never throws): not worth delaying the reply for.
+  void trackEvent({
     storeId: context.storeId,
     sessionId: context.sessionId,
     visitorId: context.visitorId,
@@ -172,6 +174,7 @@ export async function POST(request: NextRequest) {
           attachments,
           channel: "voice",
           signal: request.signal,
+          requestStartedAt,
           send: (event, data) => {
             send(event, data);
             if (event === "message.delta") reply.push((data as { text: string }).text);

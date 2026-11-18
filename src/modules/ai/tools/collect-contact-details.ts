@@ -18,7 +18,7 @@ const schema = z.object({
 export const collectContactDetailsTool: ToolDefinition = {
   name: "collect_contact_details",
   description:
-    "Show an editable form for name, phone, delivery address and delivery area, prefilled with what you understood. Use it instead of asking again whenever a detail heard by voice is unclear: a phone number that isn't a clear 11-digit mobile number starting with 01, a name or address you're unsure of, or after the customer corrected something once. The customer fixes it and sends it; their message then contains the exact details.",
+    "Show an editable form for name, phone, address and delivery area, prefilled with what you understood. Use once, when a detail is still unclear after asking once (e.g. a phone that isn't a clear 11-digit number starting with 01). Their next message then contains the exact details.",
   parameters: {
     type: "object",
     additionalProperties: false,

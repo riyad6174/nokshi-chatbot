@@ -84,22 +84,22 @@ describe("live assistant tool loop", () => {
     for (let i = 0; i < 20; i += 1) turns.push(() => [toolCall("get_cart", {}, `call_${i}`)]);
 
     const events = await collect(session, "loop");
-    // Five tool rounds, then one round with tools disabled; the model kept calling tools anyway.
-    expect(calls).toHaveLength(6);
-    expect(toolChoices).toEqual(["auto", "auto", "auto", "auto", "auto", "none"]);
+    // Three tool rounds, then one round with tools disabled; the model kept calling tools anyway.
+    expect(calls).toHaveLength(4);
+    expect(toolChoices).toEqual(["auto", "auto", "auto", "none"]);
     expect(events.at(-1)).toMatchObject({ type: "done", content: "Fallback from A", missed: true });
   });
 
   it("gives the model a final round without tools so a long tool chain still ends in a reply", async () => {
     const session = await newSession();
-    for (let i = 0; i < 5; i += 1) turns.push(() => [toolCall("get_cart", {}, `call_${i}`)]);
+    for (let i = 0; i < 3; i += 1) turns.push(() => [toolCall("get_cart", {}, `call_${i}`)]);
     turns.push(() => say("Your cart is empty."));
 
     const events = await collect(session, "what's in my cart?");
-    expect(calls).toHaveLength(6);
+    expect(calls).toHaveLength(4);
     expect(toolChoices.at(-1)).toBe("none");
     // The final round sees every tool result from the earlier rounds.
-    expect(calls.at(-1)!.filter((m) => m.role === "tool")).toHaveLength(5);
+    expect(calls.at(-1)!.filter((m) => m.role === "tool")).toHaveLength(3);
     expect(events.at(-1)).toMatchObject({ type: "done", content: "Your cart is empty.", missed: false });
   });
 
@@ -116,6 +116,61 @@ describe("live assistant tool loop", () => {
     expect(stable!.content).not.toContain("CURRENT CART");
     expect(stable!.content).not.toContain("LANGUAGE HINT");
     expect(perTurn!.content).toContain(`LANGUAGE HINT: ${session.locale}`);
+  });
+
+  it("runs lookups of one round together and hands the results back in call order", async () => {
+    const session = await newSession();
+    turns.push(() => [
+      {
+        type: "done",
+        finishReason: "tool_calls",
+        toolCalls: [
+          { id: "call_a", type: "function", function: { name: "search_products", arguments: JSON.stringify({ query: "tote" }) } },
+          { id: "call_b", type: "function", function: { name: "search_products", arguments: JSON.stringify({ query: "scarf" }) } },
+        ],
+      },
+    ]);
+    turns.push(() => say("Here are both."));
+
+    const events = await collect(session, "a tote and a scarf");
+    const results = calls[1]!.filter((m): m is Extract<ProviderMessage, { role: "tool" }> => m.role === "tool");
+    expect(results.map((m) => m.tool_call_id)).toEqual(["call_a", "call_b"]);
+    expect(results[0]!.content).toContain(fx.products.tote.id);
+    expect(results[1]!.content).toContain(fx.products.scarf.id);
+    expect(events.filter((e) => e.type === "ui" && e.part.type === "product_list")).toHaveLength(2);
+  });
+
+  it("runs a round that changes the cart one call at a time, in order", async () => {
+    const session = await newSession();
+    turns.push(() => [
+      {
+        type: "done",
+        finishReason: "tool_calls",
+        toolCalls: [
+          { id: "call_add", type: "function", function: { name: "add_to_cart", arguments: JSON.stringify({ productId: fx.products.tote.id }) } },
+          { id: "call_cart", type: "function", function: { name: "get_cart", arguments: "{}" } },
+        ],
+      },
+    ]);
+    turns.push(() => say("Added."));
+
+    await collect(session, "add the tote and show my cart");
+    const cartResult = calls[1]!.find((m) => m.role === "tool" && m.tool_call_id === "call_cart");
+    // get_cart ran after add_to_cart finished, so it sees the tote.
+    expect(cartResult?.content).toContain("Canvas Tote");
+  });
+
+  it("caps the reply length and groups requests for the prompt cache", async () => {
+    const session = await newSession();
+    let seen: StreamCompletionInput | undefined;
+    turns.push((input) => {
+      seen = input;
+      return say("Hi!");
+    });
+
+    await collect(session, "hello");
+    expect(seen?.maxOutputTokens).toBe(500);
+    expect(seen?.cacheKey).toBe(`${session.storeId}:text`);
   });
 
   it("returns tool errors to the model rather than a fake success", async () => {

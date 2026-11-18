@@ -118,8 +118,10 @@ function describeAttachments(attachments: MessageAttachment[], content: string):
 /**
  * What a reply showed on screen, for the model's memory. Without it, the next turn knows a product
  * was shown but not its id, guesses one, and the cart rejects it ("product not found").
+ * Versions are listed by name only: add_to_cart takes the version name, and the ids are long.
+ * `brief` (an older list, not the latest one on screen): products and ids only, no versions.
  */
-function describeShownParts(structuredContent: string | null): string {
+function describeShownParts(structuredContent: string | null, options: { brief?: boolean } = {}): string {
   if (!structuredContent) return "";
   let parts: ChatPart[];
   try {
@@ -131,10 +133,11 @@ function describeShownParts(structuredContent: string | null): string {
   for (const part of parts) {
     if (part.type === "product_list") {
       for (const product of part.products.slice(0, 6)) {
-        const versions = product.variants
-          .map((variant) => `${variant.title} (variantId=${variant.id}, ${variant.available ? "in stock" : "sold out"})`)
-          .join("; ");
-        lines.push(`- ${product.name} productId=${product.id}${versions ? `: ${versions}` : product.available ? " (in stock)" : " (sold out)"}`);
+        const versions = options.brief
+          ? ""
+          : product.variants.map((variant) => `${variant.title} (${variant.available ? "in stock" : "sold out"})`).join("; ");
+        const stock = product.available ? " (in stock)" : " (sold out)";
+        lines.push(`- ${product.name} productId=${product.id}${versions ? `: ${versions}` : stock}`);
       }
     } else if (part.type === "cart_summary") {
       lines.push(`- Cart: ${part.cart.items.map((item) => `${item.quantity}x ${item.name}${item.variantTitle ? ` (${item.variantTitle})` : ""}`).join(", ") || "empty"}`);
@@ -149,50 +152,139 @@ function describeShownParts(structuredContent: string | null): string {
   return lines.length > 0 ? `[On screen with this reply:\n${lines.join("\n")}]` : "";
 }
 
-/** Text-only history for the model. Staff replies are included so the AI knows what a human already said. */
-export async function getProviderHistory(conversationId: string, limit = 20) {
-  const rows = await prisma.message.findMany({
+export type ProviderHistoryRow = Pick<
+  Message,
+  "role" | "content" | "structuredContent" | "attachments" | "senderName" | "createdAt"
+>;
+
+/** The newest model-visible messages, before token budgeting. */
+export async function getProviderHistoryRows(conversationId: string, limit = 20): Promise<ProviderHistoryRow[]> {
+  if (!isObjectId(conversationId)) return [];
+  return prisma.message.findMany({
     where: { conversationId, role: { in: ["user", "assistant", "agent"] } },
     orderBy: { createdAt: "desc" },
     take: limit,
+    select: {
+      role: true,
+      content: true,
+      structuredContent: true,
+      attachments: true,
+      senderName: true,
+      createdAt: true,
+    },
   });
-  return rows
-    .reverse()
-    .map((row) => {
-      if (row.role === "user") {
-        const extra = describeAttachments(row.attachments, row.content);
-        return { role: "user" as const, content: [row.content, extra].filter(Boolean).join("\n") };
-      }
-      const prefix = row.role === "agent" ? `[Reply from store staff${row.senderName ? ` ${row.senderName}` : ""}] ` : "";
-      const shown = row.role === "assistant" ? describeShownParts(row.structuredContent) : "";
-      return { role: "assistant" as const, content: [`${prefix}${row.content}`, shown].filter(Boolean).join("\n") };
-    })
-    .filter((row) => row.content.trim().length > 0);
 }
 
-export type InboxFilter = "attention" | "human" | "bot" | "closed" | "all";
+function toHistoryMessage(
+  row: ProviderHistoryRow,
+  options: { briefShown?: boolean } = {},
+): { role: "user" | "assistant"; content: string } {
+  if (row.role === "user") {
+    const extra = describeAttachments(row.attachments, row.content);
+    return { role: "user", content: [row.content, extra].filter(Boolean).join("\n") };
+  }
+  const prefix = row.role === "agent" ? `[Reply from store staff${row.senderName ? ` ${row.senderName}` : ""}] ` : "";
+  const shown = row.role === "assistant" ? describeShownParts(row.structuredContent, { brief: options.briefShown }) : "";
+  return { role: "assistant", content: [`${prefix}${row.content}`, shown].filter(Boolean).join("\n") };
+}
 
-export async function listConversations(storeId: string, filter: InboxFilter = "all", take = 60) {
-  const status =
-    filter === "attention"
-      ? { in: ["waiting_human"] }
-      : filter === "human"
-        ? { in: ["waiting_human", "human"] }
-        : filter === "bot"
-          ? { in: ["bot"] }
-          : filter === "closed"
-            ? { in: ["closed"] }
-            : undefined;
+function showsProductList(structuredContent: string | null): boolean {
+  return Boolean(structuredContent?.includes('"product_list"'));
+}
+
+const BANGLA = /[ঀ-৿]/g;
+
+/**
+ * Roughly what a message costs in tokens, in English-character units (about 4 per token). Bangla
+ * takes about twice as many tokens per character, so a plain character count let Bangla chats use
+ * about twice the intended budget.
+ */
+export function historyCost(text: string): number {
+  return text.length + (text.match(BANGLA)?.length ?? 0);
+}
+
+/**
+ * Applies a token budget (see historyCost) from the newest message backwards. Only the newest
+ * product list on screen keeps its versions; older ones keep names and ids. The returned cutoff is
+ * the oldest message included, so older messages can be summarized without querying the recent
+ * window again.
+ */
+export function buildProviderHistory(
+  rows: ProviderHistoryRow[],
+  maxChars = 10_000,
+): { history: { role: "user" | "assistant"; content: string }[]; cutoff: Date | null } {
+  const selected: { role: "user" | "assistant"; content: string; createdAt: Date }[] = [];
+  let used = 0;
+  let newerList = false;
+  for (const row of rows) {
+    const lists = row.role === "assistant" && showsProductList(row.structuredContent);
+    const message = toHistoryMessage(row, { briefShown: lists && newerList });
+    if (lists) newerList = true;
+    if (!message.content.trim()) continue;
+    const cost = historyCost(message.content);
+    if (selected.length > 0 && used + cost > maxChars) break;
+    selected.unshift({ ...message, createdAt: row.createdAt });
+    used += cost;
+  }
+  return {
+    history: selected.map(({ role, content }) => ({ role, content })),
+    cutoff: selected[0]?.createdAt ?? null,
+  };
+}
+
+/** Text-only history for the model. Staff replies are included so the AI knows what a human already said. */
+export async function getProviderHistory(conversationId: string, limit = 20) {
+  const rows = await getProviderHistoryRows(conversationId, limit);
+  return buildProviderHistory(rows, Number.POSITIVE_INFINITY).history;
+}
+
+export type InboxFilter = "all" | "attention" | "unread" | "bot" | "closed";
+
+/** Older links used `human` for chats the team had taken over; they now live under `attention`. */
+export function parseInboxFilter(raw: string | undefined | null): InboxFilter {
+  if (raw === "human") return "attention";
+  return raw === "attention" || raw === "unread" || raw === "bot" || raw === "closed" ? raw : "all";
+}
+
+/**
+ * Chats in an inbox tab. A chat with no messages at all (the widget was opened, nothing was sent)
+ * is left out: there's nothing to read or answer, and opening it showed an empty page.
+ */
+function inboxWhere(storeId: string, filter: InboxFilter) {
+  const base = { storeId, messages: { some: {} } };
+  switch (filter) {
+    case "attention":
+      // Waiting for a person, or a person has taken it over and it isn't resolved yet.
+      return { ...base, status: { in: ["waiting_human", "human"] } };
+    case "unread":
+      return { ...base, unreadForAdmin: { gt: 0 } };
+    case "bot":
+      return { ...base, status: "bot" };
+    case "closed":
+      return { ...base, status: "closed" };
+    default:
+      return base;
+  }
+}
+
+export async function listConversations(storeId: string, filter: InboxFilter = "all", take = 60, skip = 0) {
   return prisma.conversation.findMany({
-    where: { storeId, ...(status ? { status } : {}) },
+    where: inboxWhere(storeId, filter),
     orderBy: { lastMessageAt: "desc" },
     take,
+    skip,
     include: {
       session: { select: { visitorId: true, locale: true } },
       _count: { select: { messages: true } },
       messages: { orderBy: { createdAt: "desc" }, take: 1, select: { content: true, role: true, createdAt: true } },
     },
   });
+}
+
+export async function countInboxFilters(storeId: string): Promise<Record<InboxFilter, number>> {
+  const filters: InboxFilter[] = ["all", "attention", "unread", "bot", "closed"];
+  const counts = await Promise.all(filters.map((filter) => prisma.conversation.count({ where: inboxWhere(storeId, filter) })));
+  return Object.fromEntries(filters.map((filter, index) => [filter, counts[index] ?? 0])) as Record<InboxFilter, number>;
 }
 
 export async function countConversationsNeedingAttention(storeId: string) {

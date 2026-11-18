@@ -16,6 +16,7 @@ export const dynamic = "force-dynamic";
 // · message.completed {messageId, userMessage} · message.error {message, retryable}
 
 export async function POST(request: NextRequest) {
+  const requestStartedAt = Date.now();
   const ipRate = await rateLimit(`message:ip:${getClientIp(request)}`, 60, 60_000);
   if (!ipRate.allowed) return jsonError(429, "rate_limited", "Too many messages. Please wait a moment and try again.");
 
@@ -38,19 +39,16 @@ export async function POST(request: NextRequest) {
     return jsonError(409, "conversation_closed", "This conversation was closed. Starting a new one.");
   }
 
-  if (parsed.data.locale) {
-    context.locale = resolveLocaleForStore(context.store, parsed.data.locale);
-    await touchSession(context.sessionId, context.locale);
-  } else {
-    await touchSession(context.sessionId);
-  }
-
-  const attachments = await claimUploads({
-    storeId: context.storeId,
-    sessionId: context.sessionId,
-    conversationId: conversation.id,
-    items: parsed.data.attachments,
-  });
+  if (parsed.data.locale) context.locale = resolveLocaleForStore(context.store, parsed.data.locale);
+  const [, attachments] = await Promise.all([
+    touchSession(context.sessionId, parsed.data.locale ? context.locale : undefined),
+    claimUploads({
+      storeId: context.storeId,
+      sessionId: context.sessionId,
+      conversationId: conversation.id,
+      items: parsed.data.attachments,
+    }),
+  ]);
   const userMessage = await appendMessage({
     conversationId: conversation.id,
     role: "user",
@@ -86,6 +84,7 @@ export async function POST(request: NextRequest) {
           channel: "text",
           signal: request.signal,
           send,
+          requestStartedAt,
         });
       } finally {
         closed = true;

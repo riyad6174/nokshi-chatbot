@@ -37,7 +37,7 @@ export function RefineChips({
                   type="button"
                   disabled={disabled}
                   onClick={() => onSelect(phrase(facet.name, value))}
-                  className="animate-pop rounded-full border bg-white px-2.5 py-1 text-[11.5px] font-medium text-stone-700 transition hover:-translate-y-px hover:shadow-sm active:scale-95 disabled:opacity-50"
+                  className="animate-pop rounded-full border bg-white px-2.5 py-1 text-[11.5px] font-medium text-stone-700 transition hover:-translate-y-px hover:shadow-sm active:scale-95 disabled:opacity-50 touch:px-3 touch:py-2 touch:text-[12.5px]"
                   style={{ borderColor: `${accent}55`, animationDelay: `${delay}ms` }}
                 >
                   {value}
@@ -52,7 +52,7 @@ export function RefineChips({
 }
 
 const fieldClass =
-  "w-full rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-[12.5px] text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none";
+  "w-full rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-[12.5px] text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none touch:py-2.5 touch:text-[16px]";
 
 /** Collects delivery details in the chat, then hands off to checkout with them pre-filled. */
 export function DetailsForm({

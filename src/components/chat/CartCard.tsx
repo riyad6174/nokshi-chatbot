@@ -40,7 +40,7 @@ export function CartCard({
 
   return (
     <div data-testid="cart-summary" className="text-[12.5px]">
-      <ul className="chat-scroll max-h-[min(18rem,45dvh)] space-y-2.5 overflow-y-auto pr-0.5">
+      <ul className="chat-scroll max-h-[min(18rem,45dvh)] space-y-2.5 overflow-y-auto pr-0.5 touch:max-h-none touch:overflow-visible">
         {cart.items.map((item) => {
           const busy = busyItemId === item.itemId;
           return (
@@ -66,7 +66,7 @@ export function CartCard({
                       aria-label={`Decrease quantity of ${item.name}`}
                       onClick={() => onUpdate(item.itemId, item.quantity - 1)}
                       disabled={busy}
-                      className="flex h-6 w-6 items-center justify-center rounded-full text-stone-600 transition hover:bg-white disabled:opacity-40"
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-stone-600 transition hover:bg-white disabled:opacity-40 touch:h-9 touch:w-9 touch:text-[16px]"
                     >
                       −
                     </button>
@@ -76,7 +76,7 @@ export function CartCard({
                       aria-label={`Increase quantity of ${item.name}`}
                       onClick={() => onUpdate(item.itemId, item.quantity + 1)}
                       disabled={busy}
-                      className="flex h-6 w-6 items-center justify-center rounded-full text-stone-600 transition hover:bg-white disabled:opacity-40"
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-stone-600 transition hover:bg-white disabled:opacity-40 touch:h-9 touch:w-9 touch:text-[16px]"
                     >
                       +
                     </button>
@@ -86,7 +86,7 @@ export function CartCard({
                     aria-label={`Remove ${item.name}`}
                     onClick={() => onRemove(item.itemId)}
                     disabled={busy}
-                    className="text-[11px] font-medium text-stone-400 transition hover:text-rose-600 disabled:opacity-40"
+                    className="text-[11px] font-medium text-stone-400 transition hover:text-rose-600 disabled:opacity-40 touch:px-1 touch:py-2 touch:text-[12px] touch:text-stone-500"
                   >
                     Remove
                   </button>

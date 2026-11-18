@@ -91,3 +91,30 @@ describe("OpenAI-compatible provider retries", () => {
     expect(body.tool_choice).toBe("none");
   });
 });
+
+describe("OpenAI-compatible request body", () => {
+  async function body(overrides: Partial<AiConfig>, extra: { maxOutputTokens?: number; cacheKey?: string } = {}) {
+    const fetchMock = vi.fn().mockResolvedValue(sse("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const events: ProviderStreamEvent[] = [];
+    for await (const event of streamCompletion({ config: { ...config, ...overrides }, messages: [{ role: "user", content: "hi" }], tools: [], ...extra })) {
+      events.push(event);
+    }
+    return JSON.parse(String(fetchMock.mock.calls[0]![1].body)) as Record<string, unknown>;
+  }
+
+  it("sends the output cap, and the cache key only to OpenAI's own API", async () => {
+    const other = await body({}, { maxOutputTokens: 300, cacheKey: "store:text" });
+    expect(other).toMatchObject({ max_tokens: 300, temperature: 0.2 });
+    expect(other).not.toHaveProperty("prompt_cache_key");
+
+    const openai = await body({ baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" }, { maxOutputTokens: 300, cacheKey: "store:text" });
+    expect(openai).toMatchObject({ model: "gpt-4o-mini", max_tokens: 300, prompt_cache_key: "store:text" });
+  });
+
+  it("leaves out temperature and the cap for reasoning models, which reject them", async () => {
+    const reasoning = await body({ baseUrl: "https://api.openai.com/v1", model: "o4-mini" }, { maxOutputTokens: 300 });
+    expect(reasoning).not.toHaveProperty("temperature");
+    expect(reasoning).not.toHaveProperty("max_tokens");
+  });
+});

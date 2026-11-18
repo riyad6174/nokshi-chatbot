@@ -178,3 +178,27 @@ export const aiConnectionFormSchema = z.object({
   model: z.string().trim().min(1, "Choose a model").max(150),
   effort: z.enum(["low", "medium", "high", "xhigh", "max"]),
 });
+
+/** USD per one million tokens. `*` as the model is a provider-wide fallback. */
+/** An optional per-million rate from a form field: empty means "not set" (null), not 0. */
+const optionalRate = z.preprocess(
+  (value) => (value === "" || value == null ? null : value),
+  z.coerce.number().min(0).max(1_000_000).nullable(),
+);
+
+export const modelPricingFormSchema = z.object({
+  id: z.string().trim().max(50).optional().or(z.literal("")),
+  providerId: z.string().trim().min(1, "Choose a provider").max(100),
+  model: z.string().trim().min(1, "Enter a model name or *").max(150),
+  inputPerMillion: z.coerce.number().min(0).max(1_000_000),
+  cachedInputPerMillion: z.coerce.number().min(0).max(1_000_000),
+  cacheWritePerMillion: z.coerce.number().min(0).max(1_000_000),
+  outputPerMillion: z.coerce.number().min(0).max(1_000_000),
+  reasoningPerMillion: z.coerce.number().min(0).max(1_000_000).optional(),
+  // Optional audio rates: left empty, audio tokens use the text rates.
+  audioInputPerMillion: optionalRate,
+  cachedAudioInputPerMillion: optionalRate,
+  audioOutputPerMillion: optionalRate,
+  active: z.boolean().default(true),
+  note: z.string().trim().max(300).default(""),
+});

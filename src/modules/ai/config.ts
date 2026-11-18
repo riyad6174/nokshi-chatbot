@@ -36,26 +36,45 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
+/** Anything saved on Admin → AI model (the save always writes the provider, base URL and model). */
+function savedInDashboard(settings: SettingsLike): boolean {
+  if (!settings) return false;
+  return Boolean(
+    settings.model?.trim() ||
+      settings.aiBaseUrl?.trim() ||
+      settings.aiApiKeyEncrypted ||
+      (settings.provider && settings.provider !== "openai-compatible"),
+  );
+}
+
 /**
- * Dashboard settings win; empty fields fall back to the AI_* environment variables.
+ * Admin → AI model is the source of truth: once a connection is saved there, its provider, base URL
+ * and model are used as a whole, never mixed with the AI_PROVIDER / AI_BASE_URL / AI_MODEL
+ * environment variables (those only apply while nothing is saved in the dashboard). The one
+ * fallback is the key: without a saved key, AI_API_KEY is used, and the dashboard says so.
  * `config` is null when no usable connection exists, which keeps the widget in demo mode.
  */
 export function resolveAiStatus(settings: SettingsLike): AiConfigStatus {
-  const providerId = settings?.provider && settings.provider !== "openai-compatible"
-    ? settings.provider
-    : env.AI_PROVIDER || "openai-compatible";
+  const dashboard = savedInDashboard(settings);
+  const providerId = dashboard ? settings?.provider || "openai-compatible" : env.AI_PROVIDER || "openai-compatible";
   const preset = getPreset(providerId);
 
   const storedKey = decryptSecret(settings?.aiApiKeyEncrypted);
   const keyUnreadable = Boolean(settings?.aiApiKeyEncrypted) && storedKey === null;
-  const envKey = env.AI_API_KEY.trim();
+  // A saved key that can't be read must be re-entered; quietly using another key would hide that.
+  const envKey = keyUnreadable ? "" : env.AI_API_KEY.trim();
   const apiKey = storedKey ?? envKey;
   const keySource = storedKey ? "dashboard" : envKey ? "environment" : "none";
   const keyLast4 = storedKey ? settings?.aiApiKeyLast4 ?? "" : envKey.slice(-4);
 
-  const baseUrl = (settings?.aiBaseUrl || (preset.kind === "anthropic" ? "" : preset.baseUrl || env.AI_BASE_URL))
-    .replace(/\/+$/, "");
-  const model = settings?.model || preset.suggestedModel || env.AI_MODEL;
+  const baseUrl = (
+    dashboard
+      ? settings?.aiBaseUrl || preset.baseUrl
+      : preset.kind === "anthropic"
+        ? ""
+        : preset.baseUrl || env.AI_BASE_URL
+  ).replace(/\/+$/, "");
+  const model = dashboard ? settings?.model?.trim() || preset.suggestedModel : env.AI_MODEL || preset.suggestedModel;
   const effort = (EFFORT_LEVELS as readonly string[]).includes(settings?.aiEffort ?? "")
     ? (settings!.aiEffort as EffortLevel)
     : "medium";

@@ -15,6 +15,10 @@ import {
   variantFormSchema,
 } from "@/lib/validation/schemas";
 import { logger } from "@/lib/logging/logger";
+import { invalidateCatalog } from "@/modules/catalog/product.service";
+import { updateUnansweredQuestion } from "@/modules/knowledge/learning.service";
+import { snapshotKnowledgeVersion } from "@/modules/knowledge/versions.service";
+import { recordPromptVersion } from "@/modules/ai/prompt-versions.service";
 
 function fail(path: string, message: string): never {
   redirect(`${path}${path.includes("?") ? "&" : "?"}error=${encodeURIComponent(message)}`);
@@ -91,6 +95,7 @@ export async function createProductAction(formData: FormData) {
 
   logger.info("admin.product_created", { productId: product.id, storeId: store.id });
   revalidatePath("/admin/products");
+  invalidateCatalog(store.id);
   revalidatePath("/");
   redirect(`/admin/products/${product.id}?created=1`);
 }
@@ -138,6 +143,7 @@ export async function updateProductAction(formData: FormData) {
 
   revalidatePath("/admin/products");
   revalidatePath(path);
+  invalidateCatalog(store.id);
   revalidatePath("/");
   redirect(`${path}?saved=1`);
 }
@@ -151,6 +157,7 @@ export async function deleteProductAction(formData: FormData) {
   if (!product) fail("/admin/products", "Product not found.");
 
   await prisma.product.delete({ where: { id } });
+  invalidateCatalog(store.id);
   logger.info("admin.product_deleted", { productId: id, storeId: store.id });
   revalidatePath("/admin/products");
   revalidatePath("/");
@@ -207,6 +214,7 @@ export async function createVariantAction(formData: FormData) {
 
   revalidatePath(path);
   revalidatePath("/admin/products");
+  invalidateCatalog(store.id);
   revalidatePath("/");
   redirect(`${path}?saved=1`);
 }
@@ -235,6 +243,7 @@ export async function updateVariantStockAction(formData: FormData) {
   });
 
   revalidatePath(path);
+  invalidateCatalog(store.id);
   revalidatePath("/");
   redirect(`${path}?saved=1`);
 }
@@ -251,12 +260,14 @@ export async function deleteVariantAction(formData: FormData) {
   if (!variant) fail(path, "Variant not found.");
 
   await prisma.productVariant.delete({ where: { id: variantId } });
+  invalidateCatalog(store.id);
   revalidatePath(path);
   revalidatePath("/");
   redirect(`${path}?saved=1`);
 }
 
 export async function createKnowledgeAction(formData: FormData) {
+  const admin = await requireAdmin();
   const store = await getAdminStore();
   const path = "/admin/knowledge/new";
   const parsed = knowledgeFormSchema.safeParse({
@@ -274,7 +285,7 @@ export async function createKnowledgeAction(formData: FormData) {
   });
   if (duplicate) fail(path, "A document with that title already exists.");
 
-  await prisma.knowledgeDocument.create({
+  const document = await prisma.knowledgeDocument.create({
     data: {
       storeId: store.id,
       title: parsed.data.title,
@@ -285,12 +296,29 @@ export async function createKnowledgeAction(formData: FormData) {
       contentHash: createHash("sha256").update(parsed.data.content).digest("hex"),
     },
   });
+  await snapshotKnowledgeVersion({
+    storeId: store.id,
+    documentId: document.id,
+    status: parsed.data.status === "ready" ? "published" : "draft",
+    createdBy: admin.email,
+  });
+
+  const questionId = String(formData.get("questionId") || "");
+  if (questionId) {
+    await updateUnansweredQuestion({
+      storeId: store.id,
+      id: questionId,
+      status: "answered",
+      resolvedKnowledgeId: document.id,
+    });
+  }
 
   revalidatePath("/admin/knowledge");
   redirect("/admin/knowledge?saved=1");
 }
 
 export async function updateKnowledgeAction(formData: FormData) {
+  const admin = await requireAdmin();
   const store = await getAdminStore();
   const id = String(formData.get("id") || "");
   const path = `/admin/knowledge/${id}`;
@@ -326,6 +354,14 @@ export async function updateKnowledgeAction(formData: FormData) {
       contentHash: createHash("sha256").update(parsed.data.content).digest("hex"),
     },
   });
+  await snapshotKnowledgeVersion({
+    storeId: store.id,
+    documentId: id,
+    status: parsed.data.status === "ready" ? "published" : "draft",
+    createdBy: admin.email,
+  });
+  // Any edit can change the answer, even when the version number stays the same.
+  await prisma.answerCacheEntry.deleteMany({ where: { storeId: store.id, knowledgeDocumentId: id } });
 
   revalidatePath("/admin/knowledge");
   revalidatePath(path);
@@ -427,6 +463,7 @@ export async function updateChatbotSettingsAction(formData: FormData) {
       widgetTheme: JSON.stringify(theme),
     },
   });
+  await recordPromptVersion({ storeId: store.id, content: parsed.data.systemInstructions, createdBy: "settings" });
 
   revalidatePath("/admin/settings");
   revalidatePath("/");

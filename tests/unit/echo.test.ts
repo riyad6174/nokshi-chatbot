@@ -16,3 +16,15 @@ describe("echo detection", () => {
     expect(isLikelyEcho("I found two backpacks for you", "")).toBe(false);
   });
 });
+
+describe("empty transcripts", () => {
+  it("treats punctuation-only transcripts as no speech, and keeps any real word or digit", async () => {
+    const { hasSpeechText } = await import("@/modules/speech/echo");
+    expect(hasSpeechText("")).toBe(false);
+    expect(hasSpeechText(" … . ")).toBe(false);
+    expect(hasSpeechText("হ্যাঁ")).toBe(true);
+    expect(hasSpeechText("না")).toBe(true);
+    expect(hasSpeechText("1")).toBe(true);
+    expect(hasSpeechText("ok")).toBe(true);
+  });
+});

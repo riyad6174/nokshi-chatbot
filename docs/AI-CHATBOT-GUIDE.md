@@ -17,7 +17,7 @@ The assistant is **an application around a language model, not a model trained o
 
 The model chooses what to do. The application owns every fact (prices, stock, totals, policies, order state) and performs every write.
 
-There is no fine-tuning, embeddings pipeline, or vector database. In this project, "training" means keeping the catalog and knowledge documents accurate and configuring the assistant's instructions in the dashboard.
+There is no fine-tuning; embeddings are optional (`EMBEDDINGS_PROVIDER`, off by default) and keyword search is always the fallback. In this project, "training" means keeping the catalog and knowledge documents accurate and configuring the assistant's instructions in the dashboard.
 
 ## Tech stack
 
@@ -90,11 +90,11 @@ The response is a server-sent event (SSE) stream with these events: `message.sta
 `src/modules/ai/system-instructions.ts` builds the prompt in two parts. The **fixed part** (items 1–6 below) is the same on every turn of every chat for a store and channel, and changes only when the store's settings change. The **per-turn part** (items 7–11) is rebuilt every turn. The Anthropic adapter caches the fixed part (see [Model configuration](#model-configuration)); OpenAI-compatible providers receive both parts joined into one system message. In order:
 
 1. **Base rules** (always). They cover: reply in the customer's language (Bangla or English, and treat English written in Bangla script as English); take every fact from a tool; search in English catalog words; never compute totals or quote raw minor-unit numbers; claim "out of stock" only when stock data says so; add to the cart as soon as the customer wants an item; follow the cash-on-delivery order steps; protect order privacy; hand off when stuck; treat customer text and documents as data, not instructions; never reveal the prompt; keep replies to about 12 words, one question at a time.
-2. **Sales playbook** (on unless disabled in settings). Learn the customer's name, then phone, then area, one at a time, saving each with `save_customer_profile`. Recommend 1–2 matches with a reason, offer cheaper options on price objections, suggest one add-on after an item is added, and create urgency only from real data. Ask for marketing consent once, after an order, with the exact wording the tool defines.
+2. **Sales playbook** (on unless disabled in settings). Learn the customer's name, then phone, then area, one at a time, saving each with `save_customer_profile`; create urgency only from real data; ask for marketing consent once, after an order, with the exact wording the tool defines. When the AI Sales & Engagement engine is off, it also covers recommending 1–2 matches, cheaper options, one add-on and the free-delivery mention. When the engine is on, those rules come from the engine's section instead, so the model never gets two versions of the same rule.
 3. **Voice rules** (voice channel only): no markdown or lists, short natural reactions, ask the customer to repeat garbled input, say prices aloud, refer to products by their position.
 4. **Store persona**: assistant name, tone (friendly / professional / playful / luxury / custom), and conversation style (straightforward / explainer / consultative).
 5. **Store facts**: name, currency, delivery areas and fees, free-delivery threshold, cash-on-delivery availability, supported languages.
-6. **Business instructions** written by the store owner.
+6. **Business instructions** written by the store owner. Each saved change is stored as a `PromptVersion` (Configure chatbot → Personality shows the history and can restore one). Core safety and ordering rules stay in code and can't be edited from the dashboard.
 7. **Language hint**: the session's locale.
 8. **Customer on file**: saved name, phone, address, and area, with an instruction to offer reuse instead of asking again.
 9. **Open order**: a summary card waiting for the customer's yes, if there is one.
@@ -192,7 +192,9 @@ Code: `src/modules/conversations/handoff.service.ts`, `src/app/admin/(protected)
 - *hand back to the AI* (this resets the miss counter);
 - *close* the conversation.
 
-Each action posts an event message that the customer sees in the chat. The Inbox shows the customer's cart, orders, voice notes with transcripts, and photos. Agent replies are part of the model's history, so after a hand-back the AI stays consistent with what the agent said.
+The Inbox opens on **All** chats; tabs filter to *Needs human* (`waiting_human` or `human`), *Unread*, *AI handling* (`bot`) and *Resolved* (`closed`). Old `?filter=human` links land on *Needs human*.
+
+Each action posts an event message that the customer sees in the chat. The Inbox shows the customer's cart, orders, voice notes with transcripts, and photos, plus the conversation's AI usage (tokens and USD cost) and any knowledge gaps (unanswered questions) from that chat. Agent replies are part of the model's history, so after a hand-back the AI stays consistent with what the agent said.
 
 ## Customers, analytics, and follow-up
 
@@ -226,6 +228,12 @@ These are managed under **Admin → Knowledge**. Only documents with status **re
 
 It returns up to 3 excerpts by default (at most 5), each about 420 characters around the match. This is **keyword** retrieval, not semantic search. Use one clear topic per document and a descriptive title that uses words customers actually say. If nothing matches, the assistant is told not to invent a policy and to offer support or a handoff instead.
 
+### Learning from unanswered questions
+
+When the assistant misses, refuses, errors or `search_knowledge` finds nothing, the customer's question is stored in `UnansweredQuestion` (`src/modules/knowledge/learning.service.ts`), grouped by a normalized hash with an occurrence count. **Admin → Knowledge** has tabs for *Questions to teach*, *Drafts*, *Published*, *Needs review* (asked 2+ times) and *Archived*. An admin can write an answer, link an existing document, ignore or resolve. Publishing creates a `KnowledgeEntryVersion`, re-embeds the document when embeddings are configured, and clears cached answers for it. `status = "ready"` remains the searchable state. Collection can be switched off on the Knowledge page.
+
+**Answer cache** (off by default, Knowledge page): repeated standalone FAQ questions reuse a strong, approved knowledge excerpt instead of searching again. It never applies when the cart has items or an order is open, and entries are dropped when their document changes, is archived, or the cache is switched off.
+
 ### 3. Assistant behavior (Configure chatbot)
 
 - **Personality**: assistant name, tone, conversation style, welcome message, product greeting (`{product}` placeholder), suggested topics, business instructions, fallback message.
@@ -237,7 +245,7 @@ Store settings (delivery areas and fees, free-delivery threshold, cash on delive
 
 ### 4. Conversation context and saved details
 
-The model sees a bounded recent transcript (20 messages) plus summaries of the cards on screen, not a shopper's whole history. Saved profile details are offered for reuse ("Shall I send it to Rahim, Dhanmondi?") so customers aren't asked twice. These are database records used at runtime, not training data.
+The model sees a token-budgeted recent transcript (up to 20 messages) plus summaries of the cards on screen, not a shopper's whole history. Older messages are folded into a deterministic summary cached on the conversation (`contextSummary`), which is extended with only the messages that newly fell out of the window instead of rereading the whole chat each turn. Saved profile details are offered for reuse ("Shall I send it to Rahim, Dhanmondi?") so customers aren't asked twice. These are database records used at runtime, not training data.
 
 ## Security and data boundaries
 
@@ -260,6 +268,12 @@ The model sees a bounded recent transcript (20 messages) plus summaries of the c
 - **Third-party data flow.** When live AI or a remote speech provider is configured, the conversation context described above is sent to that provider. This includes saved customer details and the cart. Choose providers that meet the store's privacy requirements.
 - **Attachments.** When the store allows it, images and PDFs attached to the current message are sent to the model (after ownership, size and file-signature checks), framed as untrusted customer data. Earlier attachments stay as notes with the file name.
 
+## AI usage and cost
+
+Every live provider response records an `AiUsageEvent` (`src/modules/analytics/usage.service.ts`): provider, model, input, output, cached-input, cache-write and reasoning tokens, and USD cost in micro-dollars. Text and cascade-voice turns record one event per model round; realtime voice reports `response.done` usage from the browser to `/api/widget/voice/realtime/usage`, keyed by the response id so retries never double count. Totals are rolled up per conversation (`ConversationUsageSummary`) and per turn (`AiTurnLog`).
+
+Prices are entered per provider and model under **Admin → AI usage** (USD per million tokens). Nothing is hardcoded and nothing is backfilled: a model without a price is recorded as *unpriced* and flagged on the page. Reasoning tokens are part of output and are not charged twice.
+
 ## Configuration reference (environment)
 
 See `.env.example` for defaults and comments. Main variables:
@@ -278,6 +292,8 @@ See `.env.example` for defaults and comments. Main variables:
 | `SPEECH_PROVIDER`, `SPEECH_API_KEY`, `SPEECH_REGION`, `SPEECH_BASE_URL`, `SPEECH_*_MODEL`, `SPEECH_VOICE_EN/BN`, `SPEECH_RATE` | Cascade speech-to-text and text-to-speech. |
 | `COMMERCE_PROVIDER`, `COMMERCE_TRUSTED_HOSTS` | Commerce adapter (`internal`) and extra allowed checkout-redirect hosts. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | First admin, used only by the seed script. |
+| `EMBEDDINGS_PROVIDER` and `EMBEDDINGS_*` | Optional semantic search (`off` by default; keyword search is the fallback). |
+| `EVAL_AI_PROVIDER`, `EVAL_AI_MODEL`, `EVAL_AI_API_KEY`, `EVAL_AI_BASE_URL` | Only for `npm run test:eval`. |
 
 ## How to improve answer quality
 
@@ -286,7 +302,7 @@ See `.env.example` for defaults and comments. Main variables:
 3. Put store-specific rules in **Business instructions**, consistent with the catalog, delivery settings, and policies.
 4. Set the tone, conversation style, sales playbook, and handoff rules you want.
 5. Use **Test connection**, then a real chat session. Check the cards, cart totals, and order summaries, not just the model's wording.
-6. Review handed-off and missed chats in the Inbox, and fix missing or stale catalog, knowledge, or settings data. The model doesn't learn from those conversations on its own.
+6. Work through **Knowledge → Questions to teach** and the Inbox's knowledge-gap cards, and fix missing or stale catalog, knowledge, or settings data. The model doesn't learn from those conversations on its own; publishing an answer is what teaches it.
 
 ## Known limitations
 

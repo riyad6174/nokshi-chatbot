@@ -32,20 +32,20 @@ const LABELS: Record<(typeof RECOMMENDATION_KINDS)[number], string> = {
 export const getRecommendationsTool: ToolDefinition = {
   name: "get_recommendations",
   description:
-    "Catalog-based suggestions around a product (or the cart when productId is omitted), each with a `reason` built from catalog data. kind: 'similar' (alternatives or substitutes), 'cheaper' (lower-priced alternatives, for price objections), 'complementary' (an add-on that goes with it), 'complete_the_look' (outfit or room pieces that match, with colour coordination), 'compatible' (accessories that fit a device), 'recipe' (other ingredients for a dish; set need to the dish), 'bundle' (a complete set for a need), 'personalized' (from the customer's interests or need). Shows product cards. Respects budget (maxPriceMinor), stock and the store's suggestion limits.",
+    "Suggestions around a product (or the cart if productId is omitted), each with a `reason`; shows cards and respects budget, stock and store limits. kind: similar (alternatives), cheaper (price objections), complementary (an add-on), complete_the_look (matching pieces), compatible (device accessories), recipe (other ingredients; set need to the dish), bundle (a set for a need), personalized (interests or need).",
   parameters: {
     type: "object",
     additionalProperties: false,
     required: ["kind"],
     properties: {
       kind: { type: "string", enum: [...RECOMMENDATION_KINDS] },
-      productId: { type: "string", description: "Product to base the suggestions on; defaults to the cart's items." },
+      productId: { type: "string" },
       productIds: { type: "array", items: { type: "string" }, maxItems: 5, description: "Several anchor products." },
-      need: { type: "string", description: "What it's for in the customer's words: a dish ('potato curry'), occasion ('office'), or use ('gaming')." },
-      maxPriceMinor: { type: "integer", minimum: 0, description: "Budget per item in minor units (300000 = 3,000 BDT)." },
+      need: { type: "string", description: "Dish, occasion or use in their words, e.g. 'potato curry', 'office'." },
+      maxPriceMinor: { type: "integer", minimum: 0, description: "Budget per item (300000 = 3,000 BDT)." },
       minPriceMinor: { type: "integer", minimum: 0 },
-      customerAsked: { type: "boolean", description: "True only when the customer asked for suggestions in their latest message." },
-      limit: { type: "integer", minimum: 1, maximum: 6, description: "Default from store settings (usually 3)." },
+      customerAsked: { type: "boolean", description: "True only if their latest message asked for suggestions." },
+      limit: { type: "integer", minimum: 1, maximum: 6 },
     },
   },
   schema,

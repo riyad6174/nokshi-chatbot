@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import plugin from "tailwindcss/plugin";
 
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
@@ -90,7 +91,10 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Phones and tablets: larger tap targets, and form fields big enough that iOS doesn't zoom in.
+    plugin(({ addVariant }) => addVariant("touch", "@media (pointer: coarse)")),
+  ],
 };
 
 export default config;

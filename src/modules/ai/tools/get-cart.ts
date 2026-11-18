@@ -6,13 +6,14 @@ const schema = z.object({});
 
 export const getCartTool: ToolDefinition = {
   name: "get_cart",
-  description: "Read the current session's cart. The server calculates prices and totals; never calculate them yourself.",
+  description: "Read the cart, with server-calculated totals.",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {},
   },
   schema,
+  parallelSafe: true,
   async execute(ctx) {
     const cart = await getCartForTool(ctx);
     return success({ cart: cartCompact(cart) }, [{ type: "cart_summary", cart, label: "Your cart" }]);

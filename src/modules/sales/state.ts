@@ -102,8 +102,15 @@ export async function setSuggestionOptOut(input: { storeId: string; sessionId: s
 }
 
 /** Whether suggestions are off for this visitor: this visit, or remembered from an earlier one. */
-export async function isOptedOut(input: { storeId: string; visitorId: string; state: EngagementState }): Promise<boolean> {
+export async function isOptedOut(input: {
+  storeId: string;
+  visitorId: string;
+  state: EngagementState;
+  /** The visitor's profile when the caller already loaded it (null: they have none). */
+  profile?: { proactiveOptOut: boolean | null } | null;
+}): Promise<boolean> {
   if (input.state.optOut) return true;
+  if (input.profile !== undefined) return input.profile?.proactiveOptOut === true;
   const profile = await prisma.customerProfile.findFirst({
     where: { storeId: input.storeId, visitorIds: { has: input.visitorId } },
     select: { proactiveOptOut: true },

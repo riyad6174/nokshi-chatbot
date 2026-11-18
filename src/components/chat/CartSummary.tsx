@@ -47,7 +47,7 @@ export function CartSummary({
         </p>
       </div>
 
-      <ul className={`mt-2 space-y-2.5 ${compact ? "" : "max-h-56 overflow-y-auto chat-scroll pr-0.5"}`}>
+      <ul className={`mt-2 space-y-2.5 ${compact ? "" : "max-h-56 overflow-y-auto chat-scroll pr-0.5 touch:max-h-none touch:overflow-visible"}`}>
         {cart.items.map((item) => {
           const busy = busyItemId === item.itemId;
           return (
@@ -65,7 +65,7 @@ export function CartSummary({
                     aria-label={`Decrease quantity of ${item.name}`}
                     onClick={() => onUpdate(item.itemId, item.quantity - 1)}
                     disabled={busy}
-                    className="h-6 w-6 rounded-md border border-stone-200 text-sm leading-none text-stone-600 hover:bg-stone-50 disabled:opacity-40"
+                    className="h-6 w-6 rounded-md border border-stone-200 text-sm leading-none text-stone-600 hover:bg-stone-50 disabled:opacity-40 touch:h-9 touch:w-9"
                   >
                     −
                   </button>
@@ -75,7 +75,7 @@ export function CartSummary({
                     aria-label={`Increase quantity of ${item.name}`}
                     onClick={() => onUpdate(item.itemId, item.quantity + 1)}
                     disabled={busy}
-                    className="h-6 w-6 rounded-md border border-stone-200 text-sm leading-none text-stone-600 hover:bg-stone-50 disabled:opacity-40"
+                    className="h-6 w-6 rounded-md border border-stone-200 text-sm leading-none text-stone-600 hover:bg-stone-50 disabled:opacity-40 touch:h-9 touch:w-9"
                   >
                     +
                   </button>
@@ -84,7 +84,7 @@ export function CartSummary({
                     aria-label={`Remove ${item.name}`}
                     onClick={() => onRemove(item.itemId)}
                     disabled={busy}
-                    className="ml-1 text-[11px] font-medium text-stone-500 underline-offset-2 hover:text-red-600 hover:underline disabled:opacity-40"
+                    className="ml-1 text-[11px] font-medium text-stone-500 underline-offset-2 hover:text-red-600 hover:underline disabled:opacity-40 touch:px-1 touch:py-2 touch:text-[12px]"
                   >
                     Remove
                   </button>

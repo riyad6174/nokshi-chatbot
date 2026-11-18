@@ -1,6 +1,7 @@
 import type { ProductSource } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { logger } from "@/lib/logging/logger";
+import { invalidateCatalog } from "@/modules/catalog/product.service";
 import { parseJsonObject } from "@/modules/stores/store.service";
 
 // "Auto entry": a public product API is the source of truth for the catalog. Each sync upserts into
@@ -332,6 +333,7 @@ export async function syncProductSource(storeId: string): Promise<SyncCounts> {
       await prisma.product.updateMany({ where: { id: { in: gone.map((product) => product.id) } }, data: { status: "inactive" } });
     }
 
+    invalidateCatalog(storeId);
     const counts: SyncCounts = { created, updated, deactivated: gone.length, skipped: skipped.length, total };
     await prisma.productSource.update({
       where: { storeId },

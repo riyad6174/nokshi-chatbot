@@ -27,11 +27,12 @@ For the implementation details—including the chat-to-Inbox flow, provider/tool
 
 | Page | What it does |
 |---|---|
-| **Inbox** | Chats handed to a person (red badge = waiting), plus all conversations. Take over, reply, hand back to the AI, or close. Updates live. Shows the customer's cart, orders, voice notes (with transcript) and photos. |
+| **Inbox** | Opens on all chats, with tabs for *Needs human* (waiting or taken over), *Unread*, *AI handling* and *Resolved*; the red badge counts chats waiting for a person. Take over, reply, hand back to the AI, or close. Updates live. Shows the customer's cart, orders, voice notes (with transcript), photos, the chat's AI cost and any questions the assistant couldn't answer. |
 | **Orders** | Every order, with filters. Change status (placed → confirmed → processing → shipped → delivered; cancel or refund) and add a tracking number or a note. The customer sees each change in their chat. Cancelling puts the stock back. |
 | **Products** | The product list the store and the assistant share. |
-| **Configure chatbot** | **Product list:** manual, or *auto entry* from a public product API, with field mapping, preview, and auto-sync every 15 min to daily. **Personality:** name, tone, conversation type (straightforward / explainer / consultative), greetings, topic badges, business instructions. **Human handoff:** trigger words and how many misses before handing off. **Chat box:** voice, attachments, colour, position. |
-| **Knowledge** | Policies and FAQs the assistant quotes (delivery, refunds, warranty…). |
+| **Configure chatbot** | **Product list:** manual, or *auto entry* from a public product API, with field mapping, preview, and auto-sync every 15 min to daily. **Personality:** name, tone, conversation type (straightforward / explainer / consultative), greetings, topic badges, business instructions (every saved change is versioned and can be restored). **Human handoff:** trigger words and how many misses before handing off. **Chat box:** voice, attachments, colour, position. |
+| **Knowledge** | Policies and FAQs the assistant quotes (delivery, refunds, warranty…). *Questions to teach* collects what customers asked that the assistant couldn't answer (repeats are counted); turn one into a draft, publish it, and every publish is versioned. Optional answer reuse for repeated FAQ questions (off by default). |
+| **AI usage** | Tokens and USD cost per day, channel (text/voice), provider and model, plus top conversations and a CSV export. Prices per model are entered here; unpriced models are flagged, never guessed. |
 | **AI model** | Anthropic (Claude) via the official SDK, or any OpenAI-compatible provider. Keys are encrypted. *Test connection* checks without spending tokens. |
 | **Store settings** | Store details, delivery areas and fees, free-delivery threshold, cash on delivery. |
 
@@ -61,6 +62,7 @@ production, call `GET /api/cron/product-sync` with `Authorization: Bearer $CRON_
 | Command | Covers |
 |---|---|
 | `npm test` | Unit/integration tests on a throwaway in-memory MongoDB: catalog scoping, cart rules, checkout and order placement (including the last-unit race, price changes, double submit), status transitions and stock release, order privacy, handoff rules and takeover, product-page greeting, API sync (create/update/hide/lock/failure), uploads ownership, AI tool loop, key encryption, HTTP routes |
+| `npm run test:eval` | Optional accuracy evals against a real model (set `EVAL_AI_*`, see `.env.example`) |
 | `npm run test:e2e` | Playwright, desktop and mobile: chat → refine → cart → details in chat → checkout → order → status in chat; topic badges; product-page greeting; human handoff with an agent replying from the Inbox; dashboard pages |
 
 Neither touches your real database. First E2E run: `npx playwright install chromium`.

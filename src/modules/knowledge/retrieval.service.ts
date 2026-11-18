@@ -5,6 +5,8 @@ import { semanticKnowledgeMatches, semanticSearchEnabled } from "@/modules/searc
 import { fold, stems } from "@/modules/sales/matching";
 
 export type KnowledgeHit = {
+  documentId: string;
+  version: number | null;
   title: string;
   snippet: string;
   score: number;
@@ -45,7 +47,7 @@ function wordSet(text: string): Set<string> {
 
 function bestParagraph(content: string, terms: string[]): string {
   const paragraphs = content.split(/\n\s*\n|(?<=[.!?।])\s+(?=[A-Zঀ-৿])/).filter((part) => part.trim());
-  if (paragraphs.length === 0) return content.slice(0, 420);
+  if (paragraphs.length === 0) return content.slice(0, 360);
   let best = 0;
   let bestScore = -1;
   paragraphs.forEach((paragraph, index) => {
@@ -56,10 +58,11 @@ function bestParagraph(content: string, terms: string[]): string {
       best = index;
     }
   });
-  // The best paragraph plus following ones up to ~420 characters, for context.
+  // The best paragraph plus following ones up to ~300 characters, for context without bloating
+  // every model round.
   let snippet = "";
-  for (let index = best; index < paragraphs.length && snippet.length < 420; index += 1) snippet += `${snippet ? " " : ""}${paragraphs[index]!.trim()}`;
-  const trimmed = snippet.length > 480 ? `${snippet.slice(0, 480)}...` : snippet;
+  for (let index = best; index < paragraphs.length && snippet.length < 300; index += 1) snippet += `${snippet ? " " : ""}${paragraphs[index]!.trim()}`;
+  const trimmed = snippet.length > 360 ? `${snippet.slice(0, 360)}...` : snippet;
   return `${best > 0 ? "..." : ""}${trimmed}`;
 }
 
@@ -100,6 +103,8 @@ export async function searchKnowledge(storeId: string, query: string, limit = 3,
         score = 1;
       }
       return {
+        documentId: doc.id,
+        version: doc.version ?? null,
         title: doc.title,
         snippet: bestParagraph(doc.content, terms),
         score,

@@ -45,12 +45,54 @@ const tools: ToolDefinition[] = [
 
 const byName = new Map(tools.map((tool) => [tool.name, tool]));
 
-export function getProviderTools(): ProviderTool[] {
-  return tools.map((tool) => ({
+// Admin settings can turn a capability off. Tools that don't belong to a toggleable feature (orders,
+// profile, handoff, navigation) stay available so existing behaviour is unchanged.
+const TOOL_FEATURES: Record<string, string> = {
+  search_products: "product_cards",
+  get_product_details: "product_cards",
+  get_recommendations: "product_cards",
+  compare_products: "product_cards",
+  open_product_page: "product_cards",
+  get_cart: "cart_tools",
+  add_to_cart: "cart_tools",
+  update_cart_item: "cart_tools",
+  remove_cart_item: "cart_tools",
+  prepare_checkout: "cart_tools",
+  search_knowledge: "knowledge_search",
+};
+
+function enabledToolFeatures(raw: string | string[] | null | undefined): Set<string> | null {
+  if (Array.isArray(raw)) return raw.length > 0 ? new Set(raw) : null;
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) && parsed.length > 0 ? new Set(parsed.map(String)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function shortenDescription(description: string): string {
+  const text = description.replace(/\s+/g, " ").trim();
+  if (text.length <= 420) return text;
+  const cut = text.slice(0, 420);
+  const sentence = cut.lastIndexOf(". ");
+  return `${(sentence > 180 ? cut.slice(0, sentence + 1) : cut.slice(0, 417)).trim()}…`;
+}
+
+export function getProviderTools(enabledFeatures?: string | string[] | null): ProviderTool[] {
+  const enabled = enabledToolFeatures(enabledFeatures);
+  const allowed = enabled
+    ? tools.filter((tool) => {
+        const feature = TOOL_FEATURES[tool.name];
+        return !feature || enabled.has(feature);
+      })
+    : tools;
+  return allowed.map((tool) => ({
     type: "function",
     function: {
       name: tool.name,
-      description: tool.description,
+      description: shortenDescription(tool.description),
       parameters: tool.parameters,
     },
   }));
@@ -110,3 +152,8 @@ export async function executeTool(
 }
 
 export const toolNames = tools.map((tool) => tool.name);
+
+/** Whether every call in a model round only reads, so they can run at the same time. */
+export function canRunInParallel(names: string[]): boolean {
+  return names.length > 1 && names.every((name) => byName.get(name)?.parallelSafe === true);
+}

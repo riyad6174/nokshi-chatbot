@@ -7,7 +7,7 @@ import { POST as realtimeTranscriptRoute } from "@/app/api/widget/voice/realtime
 import { WIDGET_COOKIE } from "@/lib/auth/widget";
 import { encryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db/prisma";
-import { realtimeTools } from "@/modules/realtime/realtime.service";
+import { liveCallRules, pickWaitFiller, realtimeTools, WAIT_FILLERS } from "@/modules/realtime/realtime.service";
 import { resetDb, seedFixture, type Fixture } from "../helpers/fixtures";
 
 let fx: Fixture;
@@ -76,8 +76,13 @@ describe("live voice (OpenAI Realtime)", () => {
     expect(call.auth).toBe("Bearer sk-test-store-key");
     const session = call.body.session as { instructions: string; tools: Array<{ name: string }> };
     expect(session.instructions).toContain("LIVE CALL");
+    // Exactly one wait filler to say (a list invites the model to pick one favourite), never the old one.
+    expect(WAIT_FILLERS.filter((filler) => session.instructions.includes(`"${filler}"`))).toHaveLength(1);
+    expect(session.instructions).not.toContain("একটু সময় নিচ্ছি");
     expect(session.instructions).toContain("Next step toward the order");
     expect(session.tools.map((entry) => entry.name)).toContain("add_to_cart");
+    // Cost guards: truncation that keeps the cache, and a cap on runaway speech.
+    expect(call.body.session).toMatchObject({ truncation: { type: "retention_ratio" }, max_output_tokens: 600 });
   });
 
   it("refuses without a chat session, or when the store isn't on OpenAI", async () => {
@@ -87,12 +92,19 @@ describe("live voice (OpenAI Realtime)", () => {
     expect((await realtimeSessionRoute(post("/api/widget/voice/realtime/session", {}, cookie))).status).toBe(403);
   });
 
-  it("runs tools against the store, returns cards and fresh instructions, and keeps the confirm guard", async () => {
+  it("runs tools against the store, returns cards and the new order state, and keeps the confirm guard", async () => {
     const { cookie } = await openSession();
     const added = await tool(cookie, "add_to_cart", { product: "Handloom Scarf" });
     expect(added.output).toContain("\"ok\":true");
     expect(added.ui[0].type).toBe("cart_summary");
-    expect(added.instructions).toContain("Cart has items");
+    // The new next step rides in the tool output; the session instructions are never replaced mid-call.
+    expect(JSON.parse(added.output).orderState).toContain("Cart has items");
+    expect(added).not.toHaveProperty("instructions");
+    // Every result names the filler for the next pause, and it changes every time.
+    const fillers = [JSON.parse(added.output).nextFiller];
+    for (let i = 0; i < 6; i += 1) fillers.push(JSON.parse((await tool(cookie, "get_cart", {})).output).nextFiller);
+    expect(fillers.every((filler) => WAIT_FILLERS.includes(filler))).toBe(true);
+    for (let i = 1; i < fillers.length; i += 1) expect(fillers[i]).not.toBe(fillers[i - 1]);
 
     const details = { name: "Imran Hossain", phone: "জিরো ওয়ান সেভেন নাইন ফোর টু এইট ডাবল থ্রি এইট জিরো", address: "Parbatipur, Dinajpur" };
     const proposed = await tool(cookie, "propose_order", details, 3000);
@@ -126,5 +138,23 @@ describe("live voice (OpenAI Realtime)", () => {
   it("converts our tool schemas to the realtime format", () => {
     const tools = realtimeTools();
     expect(tools.every((entry) => entry.type === "function" && entry.name && entry.parameters)).toBe(true);
+  });
+});
+
+describe("wait fillers", () => {
+  it("never gives the same filler twice in a row, and uses all of them over time", () => {
+    const picks = Array.from({ length: 200 }, () => pickWaitFiller("conversation-a"));
+    for (let i = 1; i < picks.length; i += 1) expect(picks[i]).not.toBe(picks[i - 1]);
+    expect(new Set(picks).size).toBe(WAIT_FILLERS.length);
+    // Conversations don't affect each other.
+    const other = pickWaitFiller("conversation-b", () => 0);
+    expect(other).toBe(WAIT_FILLERS[0]);
+  });
+
+  it("tells the model the one filler to say, not a list to choose from", () => {
+    const rules = liveCallRules(WAIT_FILLERS[2]!);
+    expect(rules).toContain(`"${WAIT_FILLERS[2]}"`);
+    expect(WAIT_FILLERS.filter((filler) => rules.includes(filler))).toEqual([WAIT_FILLERS[2]]);
+    expect(rules).toContain("nextFiller");
   });
 });

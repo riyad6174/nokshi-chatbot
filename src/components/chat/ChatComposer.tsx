@@ -64,7 +64,8 @@ export function ChatComposer({
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (active) {
+    // Not on touch screens: the keyboard would cover the conversation the moment the chat opens.
+    if (active && !window.matchMedia("(pointer: coarse)").matches) {
       const timer = window.setTimeout(() => textareaRef.current?.focus(), 140);
       return () => window.clearTimeout(timer);
     }
@@ -228,7 +229,7 @@ export function ChatComposer({
             }
           }}
           placeholder={placeholder}
-          className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] leading-snug text-stone-800 transition placeholder:text-stone-400 focus:border-stone-300 focus:bg-white focus:outline-none disabled:opacity-60"
+          className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-[13px] leading-snug text-stone-800 transition placeholder:text-stone-400 focus:border-stone-300 focus:bg-white focus:outline-none disabled:opacity-60 touch:text-[16px]"
         />
 
         {voiceEnabled && voiceSupported && !draft.trim() && !hasReady ? (

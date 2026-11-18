@@ -2,8 +2,10 @@ import { env } from "@/lib/config/env";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import { logger } from "@/lib/logging/logger";
 import { resolveAiConfig } from "@/modules/ai/config";
-import { buildSystemInstructions } from "@/modules/ai/system-instructions";
+import { priceLabel } from "@/lib/money";
+import { buildSystemInstructions, nextOrderStep } from "@/modules/ai/system-instructions";
 import { getProviderTools } from "@/modules/ai/tools";
+import { compactToolContent } from "@/modules/ai/tools/helpers";
 import type { ToolExecutionResult } from "@/modules/ai/tools/types";
 import { getCartSummary } from "@/modules/cart/cart.service";
 import type { SessionContext } from "@/modules/conversations/session.service";
@@ -61,10 +63,42 @@ export function voiceEngine(store: Pick<StoreWithSettings, "settings">): "realti
   return realtimeSettings(store).engine === "realtime" && realtimeApiKey(store) ? "realtime" : "cascade";
 }
 
-const LIVE_CALL_RULES = `LIVE CALL: you are on a real-time voice call. You hear the customer directly and they hear you as you speak.
-- Be brief and straightforward: ONE short sentence (about 12 words), at most two when you must ask something. Then stop and let them talk. No explanations they didn't ask for, no repeating what's on screen. If they interrupt, stop and listen; never lose track of what they asked before.
-- Before a tool call that takes a moment, you may say exactly "একটু সময় নিচ্ছি…" (in English: "One moment…"), then go quiet until the result arrives. Never use any other filler such as "একটু দেখি" or "এক মিনিট".
-- Phone numbers: repeat them back digit by digit once, naturally, as part of your reply.
+/** What to say before a tool call that takes a moment. Varied, so it doesn't sound scripted. */
+export const WAIT_FILLERS = ["বুঝেছি, একটু সময় দিবেন", "আচ্ছা একটু সময় চেয়ে নিচ্ছি", "একটু অপেক্ষা করুন", "বুঝেছি, একটু অপেক্ষা করুন"];
+
+// The last filler given out per conversation, so the next one is always different. In memory: after
+// a restart (or on another server instance) the next pick is just random.
+const lastFiller = new Map<string, { text: string; at: number }>();
+
+/**
+ * A random wait filler, never the same as the one this conversation got last time. The server picks
+ * it, not the model: told to choose or rotate on its own, a model settles on one phrase and repeats
+ * it every time.
+ */
+export function pickWaitFiller(conversationId: string | null | undefined, random: () => number = Math.random): string {
+  const now = Date.now();
+  for (const [key, entry] of lastFiller) if (now - entry.at > 30 * 60_000) lastFiller.delete(key);
+  const last = conversationId ? lastFiller.get(conversationId)?.text : undefined;
+  const options = WAIT_FILLERS.filter((text) => text !== last);
+  const text = options[Math.floor(random() * options.length)] ?? WAIT_FILLERS[0]!;
+  if (conversationId) lastFiller.set(conversationId, { text, at: now });
+  return text;
+}
+
+/**
+ * Call rules. The model gets exactly one filler to say at a time: `firstFiller` for the first pause,
+ * then a fresh `nextFiller` with every tool result (see toolOutputForModel). Fixed for the whole call,
+ * so the prompt cache isn't affected.
+ */
+export function liveCallRules(firstFiller: string): string {
+  return `LIVE CALL: you are on a real-time voice call. You hear the customer directly and they hear you as you speak.
+- Say your one short sentence, then stop and let them talk. No explanations they didn't ask for. If they interrupt, stop and listen.
+- Before a tool call that takes a moment, you may say one short filler, then go quiet until the result arrives. Say exactly the filler you were given most recently, word for word: "${firstFiller}" for the first pause; after that, the "nextFiller" in the latest tool result (it changes every time, so you never sound repetitive). Never reuse an earlier filler and never make up your own (no "একটু দেখি", "এক মিনিট"). Speaking English: "One moment, please…" or "Just a moment…".
+${LIVE_CALL_RULES_REST}`;
+}
+
+const LIVE_CALL_RULES_REST = `- Phone numbers: repeat them back digit by digit once, naturally, as part of your reply (don't ask them to confirm it separately).
+- A tool result with "orderState" is the latest cart, order and next step: it replaces CURRENT CART, OPEN ORDER and the next step above.
 `;
 
 // What makes a voice sound like a person rather than an AI: everyday spoken words, not written ones.
@@ -73,10 +107,36 @@ const SOUND_HUMAN = `SOUND LIKE A REAL PERSON, NOT AN AI:
   Natural: "আচ্ছা, দেখাচ্ছি।" · "এইটা নিবেন?" · "দাম পড়বে বারোশো টাকা।" · "ঠিক আছে, অর্ডার করে দিচ্ছি।" · "নাম্বারটা একটু বলবেন?" · "কোথায় পাঠাবো?"
   Not this: "অনুগ্রহ করে", "আপনার সুবিধার্থে", "প্রদান করুন", "আপনি কি ইচ্ছুক", "নিশ্চিত করুন", "আমি আপনাকে সহায়তা করতে পারি".
 - Use the English words Bangladeshis actually say: অর্ডার, ডেলিভারি, কনফার্ম, প্রোডাক্ট, সাইজ, কালার, ক্যাশ অন ডেলিভারি, ফোন নাম্বার.
-- React like a person before answering when it fits: "আচ্ছা", "জি", "হুম", "ওহ, দারুণ!", "আরে বাহ", "ঠিক আছে". Vary them; skip them in plain answers.
 - Say prices the spoken way: "বারোশো টাকা", "সাড়ে চার হাজার টাকা", not digits read one by one.
 - In English, sound casual and warm too: contractions ("it's", "you'll"), "Sure!", "Got it", "Nice pick!".
 - Vary your rhythm: short replies, natural pauses ("হুম… এইটা ভালো হবে"), a smile in your voice. Never read like a script.`;
+
+/**
+ * The cart, order and next step as they are now: a few lines sent with a tool result after the cart
+ * or order changes. Sent this way instead of replacing the session instructions, because changing the
+ * instructions mid-call invalidates the prompt cache for everything after them (tools, the whole
+ * conversation, its audio), so every later reply would be billed in full.
+ */
+export async function realtimeStateNote(context: SessionContext): Promise<string> {
+  const [cart, openOrder, savedDetails] = await Promise.all([
+    getCartSummary(context.sessionId, context.storeId, context.store.currency),
+    describeOpenProposal(context).catch(() => null),
+    savedDetailsForVisitor(context.storeId, context.visitorId).catch(() => null),
+  ]);
+  const items =
+    cart.items.length === 0
+      ? "empty"
+      : `${cart.items
+          .map((item) => `${item.name}${item.variantTitle ? ` (${item.variantTitle})` : ""} x${item.quantity}`)
+          .join(", ")}; subtotal ${priceLabel(cart.subtotalMinor, cart.currency)}`;
+  return [
+    `Cart now: ${items}.`,
+    openOrder ? `Open order: ${openOrder}` : "",
+    `Next step: ${nextOrderStep({ cart, savedDetails, openOrder, channel: "voice" })}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
 
 /** Session instructions for the current state of the customer's cart, order and saved details. */
 export async function realtimeInstructions(context: SessionContext): Promise<string> {
@@ -96,7 +156,7 @@ export async function realtimeInstructions(context: SessionContext): Promise<str
     savedDetails,
     replyLanguage: "auto",
   });
-  return `${base}\n\n${LIVE_CALL_RULES}\n\n${SOUND_HUMAN}\n\nHOW YOU SOUND: ${realtimeSettings(context.store).style}`;
+  return `${base}\n\n${liveCallRules(pickWaitFiller(context.conversationId))}\n\n${SOUND_HUMAN}\n\nHOW YOU SOUND: ${realtimeSettings(context.store).style}`;
 }
 
 /**
@@ -110,8 +170,8 @@ export function openerInstruction(saved: SavedDetails | null): string {
 }
 
 /** Our chat-completions tool schemas in the Realtime API's flat format. */
-export function realtimeTools() {
-  return getProviderTools().map((tool) => ({
+export function realtimeTools(enabledFeatures?: string | null) {
+  return getProviderTools(enabledFeatures).map((tool) => ({
     type: "function" as const,
     name: tool.function.name,
     description: tool.function.description,
@@ -145,8 +205,14 @@ export async function createRealtimeSession(context: SessionContext): Promise<Re
         type: "realtime",
         model: voice.model,
         instructions,
-        tools: realtimeTools(),
+        tools: realtimeTools(context.store.settings?.enabledFeatures),
         tool_choice: "auto",
+        // Cost guards. Retention-ratio truncation drops the oldest part of a long call in one large
+        // block rather than a little every turn, so the cached prefix keeps matching. The output cap
+        // only stops runaway speech: replies are one sentence, and the longest normal reply (the
+        // order read-back, with the phone number digit by digit) fits well within it.
+        truncation: { type: "retention_ratio", retention_ratio: 0.7 },
+        max_output_tokens: 600,
         audio: {
           input: {
             // Transcripts are what the chat, the inbox and the AI's memory show.
@@ -181,10 +247,25 @@ export async function createRealtimeSession(context: SessionContext): Promise<Re
   return { clientSecret: body.value, expiresAt: body.expires_at ?? 0, model: voice.model, opener: openerInstruction(saved) };
 }
 
-/** Tool output for the model: the tool's content, kept small (cards carry the details on screen). */
-export function toolOutputForModel(result: ToolExecutionResult): string {
-  const serialized = JSON.stringify(result.content);
-  return serialized.length > 8_000 ? `${serialized.slice(0, 8_000)}…` : serialized;
+/**
+ * Tool output for the model, kept small like in text chat (cards carry the details on screen). On a
+ * call every result stays in the context, and is billed again, until the call ends. Extras go first,
+ * so the length cap can't cut them off: `nextFiller`, the filler to say at the next pause (see
+ * pickWaitFiller), and `orderState` (see realtimeStateNote) when the cart or order changed.
+ */
+export function toolOutputForModel(
+  result: ToolExecutionResult,
+  orderState?: string | null,
+  nextFiller?: string | null,
+): string {
+  const content = compactToolContent(result.content);
+  const extras = { ...(nextFiller ? { nextFiller } : {}), ...(orderState ? { orderState } : {}) };
+  const withExtras =
+    Object.keys(extras).length > 0 && content && typeof content === "object" && !Array.isArray(content)
+      ? { ...extras, ...content }
+      : content;
+  const serialized = JSON.stringify(withExtras);
+  return serialized.length > 6_000 ? `${serialized.slice(0, 6_000)}…` : serialized;
 }
 
 /** Whether a tool's UI means the cart or order changed (so the instructions should be refreshed). */

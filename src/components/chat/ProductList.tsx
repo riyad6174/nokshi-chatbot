@@ -84,7 +84,8 @@ export function ProductList({ products, accent, busyProductId, onAdd, display = 
       onClick={() => scrollToIndex(Math.max(0, Math.min(products.length - 1, active + direction * perView)))}
       disabled={direction < 0 ? edges.start : edges.end}
       aria-label={direction < 0 ? "Previous products" : "Next products"}
-      className={`absolute top-[38%] z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white text-stone-800 ring-1 ring-stone-200 transition hover:scale-105 hover:bg-stone-50 active:scale-95 disabled:pointer-events-none disabled:opacity-0 ${
+      // Touch screens swipe; the arrows would only cover the product photos.
+      className={`absolute top-[38%] z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white text-stone-800 ring-1 ring-stone-200 transition hover:scale-105 hover:bg-stone-50 active:scale-95 disabled:pointer-events-none disabled:opacity-0 touch:hidden ${
         direction < 0 ? "-left-2" : "-right-2"
       }`}
     >
@@ -118,7 +119,7 @@ export function ProductList({ products, accent, busyProductId, onAdd, display = 
         ))}
       </div>
       {arrow(1)}
-      <div className="mt-1 flex justify-center gap-1.5" aria-hidden="true">
+      <div className="mt-1 flex flex-wrap justify-center gap-1.5" aria-hidden="true">
         {products.map((product, index) => (
           <button
             key={product.id}

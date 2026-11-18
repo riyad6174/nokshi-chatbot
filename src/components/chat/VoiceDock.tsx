@@ -18,13 +18,13 @@ const STATUS: Record<VoicePhase, string> = {
   paused: "Muted",
 };
 
-function StatusLine({ phase }: { phase: VoicePhase }) {
+function StatusLine({ phase, align = "center", label }: { phase: VoicePhase; align?: "center" | "start"; label?: string | null }) {
   const color =
     phase === "hearing" ? "bg-emerald-400" : phase === "speaking" ? "bg-fuchsia-400" : phase === "thinking" ? "bg-indigo-300" : "bg-white/50";
   return (
     <p
-      key={phase}
-      className="caption-in flex items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/75"
+      key={`${phase}:${label ?? ""}`}
+      className={`caption-in flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/75 ${align === "center" ? "justify-center" : ""}`}
       aria-live="polite"
     >
       {phase === "thinking" || phase === "starting" ? (
@@ -42,7 +42,7 @@ function StatusLine({ phase }: { phase: VoicePhase }) {
       ) : (
         <span className={`h-1.5 w-1.5 rounded-full ${color} ${phase === "listening" ? "animate-pulse" : ""}`} aria-hidden="true" />
       )}
-      {STATUS[phase]}
+      {label ?? STATUS[phase]}
     </p>
   );
 }
@@ -99,7 +99,16 @@ export function VoiceDock({
   onLang,
   onOpenChat,
   onClose,
+  compact = false,
+  workingLabel = null,
+  position = "right",
 }: {
+  /** The side of the screen the launcher is on. */
+  position?: "left" | "right";
+  /** What the assistant is doing during a pause ("Searching products…"). */
+  workingLabel?: string | null;
+  /** A slim bar along the bottom of the screen, so cards (or a short screen) get the room. */
+  compact?: boolean;
   assistantName: string;
   accent: string;
   phase: VoicePhase;
@@ -151,13 +160,97 @@ export function VoiceDock({
     else if (phase === "speaking" || phase === "thinking") onInterrupt();
   };
 
+  // While a tool runs, say what for, except over the customer talking or a muted mic.
+  const toolLabel = active && workingLabel && shownPhase !== "hearing" && shownPhase !== "paused" ? workingLabel : null;
+  const orbLabel = !active ? "Start talking" : phase === "paused" ? "Unmute" : phase === "speaking" ? "Interrupt" : "Voice assistant";
+  const closeLabel = active ? "Minimize, the call continues" : "Close assistant";
+  const closeIcon = active ? "m6 9 6 6 6-6" : "M18 6 6 18M6 6l12 12";
+
+  if (compact) {
+    return (
+      <section
+        ref={sectionRef}
+        role="dialog"
+        aria-label={`${assistantName}, voice assistant`}
+        data-phase={shownPhase}
+        className="voice-dock fixed inset-x-2 z-50 overflow-hidden rounded-3xl bg-[#0b0a1d] text-white ring-1 ring-white/10 animate-panel-in sm:inset-x-6"
+        style={{ bottom: "calc(var(--vv-bottom, 0px) + 0.5rem)" }}
+      >
+        <div className="voice-aurora" aria-hidden="true" />
+        {celebration}
+        <div className="relative flex items-center gap-2 p-2.5">
+          <button
+            type="button"
+            onClick={onOrb}
+            disabled={!voiceAvailable && !active}
+            aria-label={orbLabel}
+            className="relative shrink-0 rounded-full transition active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:opacity-60"
+          >
+            <AssistantOrb size={46} state={orbState} level={level} accent={accent} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <StatusLine phase={shownPhase} align="start" label={toolLabel} />
+            {/* Newest words at the bottom; older ones fade out at the top. */}
+            <div className="voice-caption mt-0.5 flex h-[2.3rem] items-end overflow-hidden">
+              {error ? (
+                <p className="w-full text-[12px] leading-tight text-rose-200">{error}</p>
+              ) : (
+                <p key={captionKey} className="caption-in w-full text-[13px] font-medium leading-tight text-white">
+                  {caption || (active ? "Go ahead, I'm listening…" : "Tap the orb to talk.")}
+                </p>
+              )}
+            </div>
+          </div>
+          {active ? (
+            <>
+              <RoundButton
+                label={phase === "paused" ? "Unmute" : "Mute"}
+                onClick={phase === "paused" ? onResume : onPause}
+                tone={phase === "paused" ? "active" : "glass"}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="9" y="3" width="6" height="11" rx="3" />
+                  <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+                  {phase === "paused" ? <path d="M4 4l16 16" /> : null}
+                </svg>
+              </RoundButton>
+              <RoundButton label="End call" onClick={onStop} tone="danger">
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="currentColor">
+                  <path d="M12 9c-3.6 0-6.9 1.3-9.3 3.5-.4.4-.4 1 0 1.4l2 2c.4.4 1 .4 1.4.1l2.3-1.7c.3-.2.4-.5.4-.8V11.6a12 12 0 0 1 6.4 0v1.9c0 .3.1.6.4.8l2.3 1.7c.4.3 1 .3 1.4-.1l2-2c.4-.4.4-1 0-1.4A13.3 13.3 0 0 0 12 9z" />
+                </svg>
+              </RoundButton>
+            </>
+          ) : (
+            <RoundButton label="Open text chat" onClick={onOpenChat}>
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <rect x="3" y="6" width="18" height="12" rx="2.5" />
+                <path d="M7 10h.01M11 10h.01M15 10h.01M7.5 14h9" />
+              </svg>
+            </RoundButton>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={closeLabel}
+            title={closeLabel}
+            className="flex h-9 w-7 shrink-0 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <path d={closeIcon} />
+            </svg>
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section
       ref={sectionRef}
       role="dialog"
       aria-label={`${assistantName}, voice assistant`}
       data-phase={shownPhase}
-      className="voice-dock fixed inset-x-3 bottom-[5.75rem] z-50 overflow-hidden rounded-[28px] bg-[#0b0a1d] text-white ring-1 ring-white/10 animate-panel-in sm:inset-x-auto sm:right-6 sm:w-[380px]"
+      className={`voice-dock fixed inset-x-3 bottom-[5.75rem] z-50 overflow-hidden rounded-[28px] bg-[#0b0a1d] text-white ring-1 ring-white/10 animate-panel-in sm:inset-x-auto sm:w-[380px] ${position === "left" ? "sm:left-6" : "sm:right-6"}`}
     >
       <div className="voice-aurora" aria-hidden="true" />
       {celebration}
@@ -176,7 +269,7 @@ export function VoiceDock({
           onClick={onOpenChat}
           aria-label="Open text chat"
           title="Type instead"
-          className="rounded-full p-1.5 text-white/60 transition hover:bg-white/10 hover:text-white"
+          className="rounded-full p-1.5 text-white/60 transition hover:bg-white/10 hover:text-white touch:p-2.5"
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <rect x="3" y="6" width="18" height="12" rx="2.5" />
@@ -186,11 +279,12 @@ export function VoiceDock({
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close assistant"
-          className="rounded-full p-1.5 text-white/60 transition hover:rotate-90 hover:bg-white/10 hover:text-white"
+          aria-label={closeLabel}
+          title={closeLabel}
+          className={`rounded-full p-1.5 text-white/60 transition hover:bg-white/10 hover:text-white touch:p-2.5 ${active ? "" : "hover:rotate-90"}`}
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2">
-            <path d="M18 6 6 18M6 6l12 12" />
+            <path d={closeIcon} />
           </svg>
         </button>
       </div>
@@ -200,7 +294,7 @@ export function VoiceDock({
           type="button"
           onClick={onOrb}
           disabled={!voiceAvailable && !active}
-          aria-label={!active ? "Start talking" : phase === "paused" ? "Unmute" : phase === "speaking" ? "Interrupt" : "Voice assistant"}
+          aria-label={orbLabel}
           className="relative rounded-full transition duration-300 hover:scale-[1.03] active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {shownPhase === "listening" ? (
@@ -228,7 +322,7 @@ export function VoiceDock({
         </button>
 
         <div className="mt-3">
-          <StatusLine phase={shownPhase} />
+          <StatusLine phase={shownPhase} label={toolLabel} />
         </div>
 
         {/* Newest words at the bottom; older ones fade out at the top. */}

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { logger } from "@/lib/logging/logger";
 import type { ToolLogEntry } from "@/modules/ai/orchestrator";
+import type { NormalizedUsage } from "@/modules/ai/usage";
 
 export type TurnOutcome = "answered" | "missed" | "error" | "handoff";
 
@@ -11,6 +12,7 @@ export async function recordAiTurn(input: {
   sessionId: string;
   channel: "text" | "voice";
   mode: "live" | "demo";
+  provider?: string;
   model?: string;
   outcome: TurnOutcome;
   latencyMs: number;
@@ -18,6 +20,10 @@ export async function recordAiTurn(input: {
   toolLog?: ToolLogEntry[];
   userText?: string;
   intent?: string;
+  usage?: NormalizedUsage;
+  costMicros?: number;
+  pricingStatus?: "priced" | "unpriced" | "mixed";
+  usageEventCount?: number;
 }): Promise<void> {
   try {
     const toolCalls = (input.toolLog ?? []).slice(0, 30).map((entry) => ({
@@ -33,7 +39,17 @@ export async function recordAiTurn(input: {
         sessionId: input.sessionId,
         channel: input.channel,
         mode: input.mode,
+        provider: (input.provider ?? "").slice(0, 100),
         model: (input.model ?? "").slice(0, 100),
+        inputTokens: input.usage?.inputTokens,
+        outputTokens: input.usage?.outputTokens,
+        cachedInputTokens: input.usage?.cachedInputTokens,
+        cacheWriteInputTokens: input.usage?.cacheWriteInputTokens,
+        reasoningTokens: input.usage?.reasoningTokens,
+        totalTokens: input.usage?.totalTokens,
+        costMicros: input.costMicros,
+        pricingStatus: input.pricingStatus,
+        usageEventCount: input.usageEventCount,
         outcome: input.outcome,
         latencyMs: Math.max(0, Math.round(input.latencyMs)),
         firstTokenMs: input.firstTokenMs == null ? null : Math.max(0, Math.round(input.firstTokenMs)),

@@ -11,9 +11,12 @@ import { buildSalesTurnContext } from "@/modules/sales/prompt";
 import { getEngagementState, isOptedOut, type EngagementState } from "@/modules/sales/state";
 import { buildSystemPromptParts } from "@/modules/ai/system-instructions";
 import { describeOpenProposal } from "@/modules/orders/voice-order.service";
-import { findProfileForVisitor, savedDetailsForVisitor } from "@/modules/customers/profile.service";
+import { findProfileForVisitor, savedDetailsFromProfile } from "@/modules/customers/profile.service";
+import type { CustomerProfile } from "@prisma/client";
 import { detectLang } from "@/modules/speech/speech-provider";
-import { executeTool, getProviderTools } from "@/modules/ai/tools";
+import { addUsage, emptyUsage, type NormalizedUsage } from "@/modules/ai/usage";
+import { canRunInParallel, executeTool, getProviderTools } from "@/modules/ai/tools";
+import { compactToolContent } from "@/modules/ai/tools/helpers";
 import type { ToolContext } from "@/modules/ai/tools/types";
 import type { SessionContext } from "@/modules/conversations/session.service";
 import type { TurnChannel } from "@/modules/conversations/turn.service";
@@ -22,16 +25,41 @@ import type { CartPayload, ChatPart } from "@/types/chat";
 export type OrchestratorEvent =
   | { type: "delta"; text: string }
   | { type: "ui"; part: ChatPart }
+  /** A tool is about to run (the widget shows e.g. "Searching products�?�"). */
+  | { type: "status"; tool: string }
+  /** Token usage for one provider round, including usage from a refused response. */
+  | {
+      type: "usage";
+      usage: NormalizedUsage;
+      providerId: string;
+      model: string;
+      requestKind: "chat_round";
+      providerRequestId?: string;
+      round: number;
+      rawUsage?: unknown;
+    }
   /** `missed`: the turn ended without a real answer (fallback text or refusal); repeated misses trigger handoff. */
-  | { type: "done"; content: string; parts: ChatPart[]; missed?: boolean; toolLog?: ToolLogEntry[] };
+  | {
+      type: "done";
+      content: string;
+      parts: ChatPart[];
+      missed?: boolean;
+      refused?: boolean;
+      toolLog?: ToolLogEntry[];
+      usage?: NormalizedUsage;
+    };
 
 /** One tool call in a turn, for reliability reporting. */
 export type ToolLogEntry = { name: string; ok: boolean; code: string; ms: number };
 
 export type AssistantHistoryMessage = { role: "user" | "assistant"; content: string };
 
-/** Rounds in which the model may call tools. One more round follows, if needed, to reply in text. */
-const MAX_TOOL_ITERATIONS = 5;
+/**
+ * Rounds in which the model may call tools. One more round follows, if needed, to reply in text.
+ * Every round sends the whole prompt again. In real turns (Aug–Nov 2026) no turn made more than 2
+ * tool calls, so 3 rounds only caps a runaway turn at 4 requests instead of 6.
+ */
+const MAX_TOOL_ITERATIONS = 3;
 
 type PartBuilder = {
   text: () => string;
@@ -102,20 +130,15 @@ export async function* runLiveAssistant(input: {
     channel: input.channel ?? "text",
     latestUserText,
   };
-  const tools = getProviderTools();
   const settings = input.session.store.settings;
+  const tools = getProviderTools(settings?.enabledFeatures);
   const salesConfig = resolveSalesConfig(settings);
-  const [openOrder, savedDetails, engagement] = await Promise.all([
-    describeOpenProposal(input.session).catch(() => null),
-    savedDetailsForVisitor(input.session.storeId, input.session.visitorId).catch(() => null),
-    getEngagementState(input.session.sessionId).catch(() => null),
-  ]);
-  const salesTurn = engagement
-    ? await salesTurnContext({ session: input.session, config: salesConfig, state: engagement, cart: input.cart, latestUserText, openOrder: Boolean(openOrder) }).catch(() => "")
-    : "";
-  const attachmentParts =
+  const preModelStarted = Date.now();
+  // Everything the prompt needs, loaded at once (each is a database round-trip). The visitor's
+  // profile is read once and used for both the saved details and the sales context.
+  const loadAttachments = () =>
     input.attachments?.length && attachmentUnderstandingEnabled(salesConfig.features.attachmentUnderstanding)
-      ? await loadAttachmentParts({
+      ? loadAttachmentParts({
           storeId: input.session.storeId,
           conversationId: input.session.conversationId,
           attachments: input.attachments,
@@ -124,7 +147,28 @@ export async function* runLiveAssistant(input: {
           logger.warn("ai.attachments_failed", { error: error instanceof Error ? error.message : String(error) });
           return [];
         })
-      : [];
+      : Promise.resolve([]);
+  const [openOrder, profile, engagement, attachmentParts] = await Promise.all([
+    describeOpenProposal(input.session).catch(() => null),
+    findProfileForVisitor(input.session.storeId, input.session.visitorId).catch(() => null),
+    getEngagementState(input.session.sessionId).catch(() => null),
+    loadAttachments(),
+  ]);
+  toolContext.cartItemCount = input.cart.itemCount;
+  toolContext.openOrder = Boolean(openOrder);
+  const savedDetails = savedDetailsFromProfile(profile);
+  const salesTurn = engagement
+    ? await salesTurnContext({
+        session: input.session,
+        config: salesConfig,
+        state: engagement,
+        cart: input.cart,
+        latestUserText,
+        openOrder: Boolean(openOrder),
+        profile,
+      }).catch(() => "")
+    : "";
+  const preModelMs = Date.now() - preModelStarted;
   const system = buildSystemPromptParts({
     openOrder,
     savedDetails,
@@ -157,8 +201,12 @@ export async function* runLiveAssistant(input: {
   const toolLog: ToolLogEntry[] = [];
   let receivedAnyText = false;
   let turnRefused = false;
+  let totalUsage = emptyUsage();
+  /** How long each model round took (request to end of stream), for the timing log. */
+  const roundMs: number[] = [];
 
   for (let iteration = 0; iteration <= MAX_TOOL_ITERATIONS; iteration += 1) {
+    const roundStarted = Date.now();
     // Out of tool rounds: one last call with tools disabled, so the model answers from the results it
     // already has instead of the turn ending on cards with no reply (which would count as a miss).
     const finalRound = iteration === MAX_TOOL_ITERATIONS;
@@ -166,6 +214,11 @@ export async function* runLiveAssistant(input: {
     let toolCalls: ProviderToolCall[] = [];
     let raw: unknown;
     let refused = false;
+    let roundUsage: NormalizedUsage | null = null;
+    let roundProviderId: string | undefined;
+    let roundModel: string | undefined;
+    let roundProviderRequestId: string | undefined;
+    let roundRawUsage: unknown;
 
     try {
       for await (const event of streamCompletion({
@@ -175,6 +228,9 @@ export async function* runLiveAssistant(input: {
         signal: input.signal,
         temperature: 0.2,
         toolChoice: finalRound ? "none" : "auto",
+        // Replies are one short sentence; this only stops runaway output (Bangla needs more tokens).
+        maxOutputTokens: (input.channel ?? "text") === "voice" ? 350 : 500,
+        cacheKey: `${input.session.storeId}:${input.channel ?? "text"}`,
       })) {
         if (event.type === "delta") {
           iterationText += event.text;
@@ -185,6 +241,13 @@ export async function* runLiveAssistant(input: {
           toolCalls = event.toolCalls;
           raw = event.raw;
           refused = event.finishReason === "refusal";
+          if (event.usage) {
+            roundUsage = event.usage;
+            roundProviderId = event.providerId;
+            roundModel = event.model;
+            roundProviderRequestId = event.providerRequestId;
+            roundRawUsage = event.rawUsage;
+          }
         }
       }
     } catch (error) {
@@ -201,6 +264,21 @@ export async function* runLiveAssistant(input: {
         continue;
       }
       throw error;
+    }
+    roundMs.push(Date.now() - roundStarted);
+
+    if (roundUsage) {
+      totalUsage = addUsage(totalUsage, roundUsage);
+      yield {
+        type: "usage",
+        usage: roundUsage,
+        providerId: roundProviderId ?? input.config.providerId,
+        model: roundModel ?? input.config.model,
+        requestKind: "chat_round",
+        ...(roundProviderRequestId ? { providerRequestId: roundProviderRequestId } : {}),
+        round: iteration,
+        ...(roundRawUsage !== undefined ? { rawUsage: roundRawUsage } : {}),
+      };
     }
 
     if (refused) {
@@ -225,14 +303,23 @@ export async function* runLiveAssistant(input: {
       raw,
     });
 
-    for (const call of toolCalls) {
+    const runCall = async (call: ProviderToolCall) => {
       const toolStarted = Date.now();
       const result = await executeTool(toolContext, call.function.name, call.function.arguments);
+      return { result, ms: Date.now() - toolStarted };
+    };
+    // Lookups only (e.g. two searches): run them together. Anything that changes the cart, order or
+    // profile runs one at a time, in the order the model asked. Results are handled in call order.
+    const started = canRunInParallel(toolCalls.map((call) => call.function.name)) ? toolCalls.map(runCall) : null;
+
+    for (const [index, call] of toolCalls.entries()) {
+      yield { type: "status", tool: call.function.name };
+      const { result, ms } = started ? await started[index]! : await runCall(call);
       toolLog.push({
         name: call.function.name,
         ok: result.ok,
         code: result.ok ? "" : String((result.content as { error?: { code?: string } })?.error?.code ?? "error"),
-        ms: Date.now() - toolStarted,
+        ms,
       });
       if (!result.ok) {
         logger.warn("ai.tool_rejected", {
@@ -240,7 +327,7 @@ export async function* runLiveAssistant(input: {
           error: (result.content as { error?: { code?: string } })?.error?.code,
         });
       }
-      const serialized = JSON.stringify(result.content);
+      const serialized = JSON.stringify(compactToolContent(result.content));
       messages.push({
         role: "tool",
         tool_call_id: call.id,
@@ -264,7 +351,23 @@ export async function* runLiveAssistant(input: {
   }
 
   const parts = builder.finish();
-  yield { type: "done", content: builder.text() || buildTextFromParts(parts), parts, missed, toolLog };
+  logger.info("ai.turn_timing", {
+    storeId: input.session.storeId,
+    channel: input.channel ?? "text",
+    model: input.config.model,
+    preModelMs,
+    roundMs,
+    tools: toolLog.map((entry) => `${entry.name}:${entry.ms}`),
+  });
+  yield {
+    type: "done",
+    content: builder.text() || buildTextFromParts(parts),
+    parts,
+    missed,
+    refused: turnRefused,
+    toolLog,
+    ...(totalUsage.totalTokens > 0 ? { usage: totalUsage } : {}),
+  };
 }
 
 async function salesTurnContext(input: {
@@ -274,16 +377,17 @@ async function salesTurnContext(input: {
   cart: CartPayload;
   latestUserText: string;
   openOrder: boolean;
+  profile: CustomerProfile | null;
 }): Promise<string> {
   if (!input.config.enabled) return "";
   const intent = detectShoppingIntent({ text: input.latestUserText, cartItemCount: input.cart.itemCount, openOrder: input.openOrder });
   const recentIds = input.state.suggestedProductIds.slice(-8);
-  const [optedOut, suggested, profile] = await Promise.all([
-    isOptedOut({ storeId: input.session.storeId, visitorId: input.session.visitorId, state: input.state }),
+  const { profile } = input;
+  const [optedOut, suggested] = await Promise.all([
+    isOptedOut({ storeId: input.session.storeId, visitorId: input.session.visitorId, state: input.state, profile }),
     recentIds.length
       ? prisma.product.findMany({ where: { id: { in: recentIds }, storeId: input.session.storeId }, select: { name: true } })
       : Promise.resolve([]),
-    findProfileForVisitor(input.session.storeId, input.session.visitorId).catch(() => null),
   ]);
   return buildSalesTurnContext({
     config: input.config,

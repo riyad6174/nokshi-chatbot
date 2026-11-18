@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AssistantOrb, type OrbState } from "@/components/chat/AssistantOrb";
 import { ChatComposer, type PendingAttachment } from "@/components/chat/ChatComposer";
 import { Confetti } from "@/components/chat/Confetti";
@@ -58,11 +58,17 @@ type ChatPanelProps = {
   voiceAssistant: { available: boolean; active: boolean; onStart: () => void };
   /** What the assistant is doing, for the header orb. */
   orbState: OrbState;
+  /** What the assistant is doing right now ("Searching products…"), or null. */
+  workingLabel?: string | null;
   confirmingOrder: boolean;
   onConfirmOrder: (confirmationId: string) => void;
   /** Proactive suggestion buttons: "No thanks" / "Stop suggestions". */
   onSuggestionAction?: (suggestionId: string, action: "dismiss" | "opt_out") => void;
   closedSuggestions?: ReadonlySet<string>;
+  /** Phones and landscape phones: the chat takes the whole screen. */
+  fullScreen: boolean;
+  /** Controls of a running voice call, shown under the header when the chat is full screen. */
+  callBar?: ReactNode;
 };
 
 function isOrderPlacedEvent(message: ChatMessage): boolean {
@@ -106,10 +112,13 @@ export function ChatPanel({
   onCheckout,
   voiceAssistant,
   orbState,
+  workingLabel,
   confirmingOrder,
   onConfirmOrder,
   onSuggestionAction,
   closedSuggestions,
+  fullScreen,
+  callBar,
 }: ChatPanelProps) {
   const [cartOpen, setCartOpen] = useState(false);
   const [celebration, setCelebration] = useState<string | null>(null);
@@ -139,14 +148,31 @@ export function ChatPanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
+  // Follow new messages only while the customer is at the bottom (or just sent something); someone
+  // scrolled up to re-read a product isn't yanked down by every streamed word.
+  const atBottomRef = useRef(true);
+  const [newBelow, setNewBelow] = useState(false);
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const container = scrollRef.current;
+    if (container) container.scrollTo({ top: container.scrollHeight, behavior });
+    atBottomRef.current = true;
+    setNewBelow(false);
+  }, []);
+  const onScroll = () => {
+    const container = scrollRef.current;
+    if (!container) return;
+    atBottomRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+    if (atBottomRef.current) setNewBelow(false);
+  };
+  const lastRole = messages[messages.length - 1]?.role;
   useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(() => {
-      const container = scrollRef.current;
-      if (container) container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      if (atBottomRef.current || lastRole === "user") scrollToBottom();
+      else setNewBelow(true);
     }, 60);
     return () => window.clearTimeout(timer);
-  }, [open, messages, sending]);
+  }, [open, messages, sending, lastRole, scrollToBottom]);
 
   useEffect(() => {
     if (!cart || cart.items.length === 0) setCartOpen(false);
@@ -175,8 +201,12 @@ export function ChatPanel({
     <section
       role="dialog"
       aria-label={`${storeName} chat`}
-      className={`fixed inset-x-2 bottom-[5.75rem] top-2 z-50 flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-panel animate-panel-in sm:inset-auto sm:bottom-24 sm:h-[min(680px,calc(100dvh-7.5rem))] sm:w-[400px] ${
-        position === "left" ? "sm:left-6 origin-bottom-left" : "sm:right-6 origin-bottom-right"
+      className={`fixed z-50 flex flex-col overflow-hidden bg-white shadow-panel animate-panel-in ${
+        fullScreen
+          ? "inset-x-0 bottom-[var(--vv-bottom,0px)] top-[var(--vv-top,0px)]"
+          : `bottom-24 h-[min(680px,calc(100dvh-7.5rem))] w-[400px] rounded-2xl border border-stone-200 ${
+              position === "left" ? "left-6 origin-bottom-left" : "right-6 origin-bottom-right"
+            }`
       }`}
     >
       <header
@@ -222,14 +252,17 @@ export function ChatPanel({
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close chat"
-          className="relative rounded-lg p-1.5 text-white/80 transition hover:rotate-90 hover:bg-white/10 hover:text-white"
+          aria-label={voiceAssistant.active ? "Minimize chat, the call continues" : "Close chat"}
+          title={voiceAssistant.active ? "Minimize (the call continues)" : undefined}
+          className={`relative rounded-lg p-1.5 text-white/80 transition hover:bg-white/10 hover:text-white touch:p-2.5 ${voiceAssistant.active ? "" : "hover:rotate-90"}`}
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 6 6 18M6 6l12 12" />
+            <path d={voiceAssistant.active ? "m6 9 6 6 6-6" : "M18 6 6 18M6 6l12 12"} />
           </svg>
         </button>
       </header>
+
+      {callBar}
 
       {showDemoBanner ? (
         <div className="border-b border-amber-100 bg-amber-50 px-3 py-1.5 text-[10.5px] leading-snug text-amber-800">
@@ -246,7 +279,7 @@ export function ChatPanel({
         </div>
       ) : null}
 
-      <div ref={scrollRef} className="chat-scroll flex-1 overflow-y-auto bg-gradient-to-b from-stone-50/60 to-white px-3 py-3">
+      <div ref={scrollRef} onScroll={onScroll} className="chat-scroll flex-1 overflow-y-auto overscroll-contain bg-gradient-to-b from-stone-50/60 to-white px-3 py-3">
         {loading ? (
           <div className="space-y-3 pt-1" aria-label="Loading chat">
             <div className="flex items-start gap-2">
@@ -296,11 +329,27 @@ export function ChatPanel({
             voiceAvailable={voiceAssistant.available && !voiceAssistant.active && mode === "bot"}
             onStartVoice={voiceAssistant.onStart}
             voiceActive={voiceAssistant.active}
+            workingLabel={workingLabel ?? null}
           />
         ) : null}
       </div>
 
       {celebration ? <Confetti key={celebration} /> : null}
+
+      {newBelow ? (
+        <div className="pointer-events-none relative z-10 -mt-12 flex h-12 items-start justify-center">
+          <button
+            type="button"
+            onClick={() => scrollToBottom()}
+            className="pointer-events-auto flex animate-pop items-center gap-1.5 rounded-full bg-stone-900 px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-lg touch:py-2"
+          >
+            New messages
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
 
       {toast ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-28 flex justify-center">

@@ -238,7 +238,7 @@ export function FloatingActions({
     const single = part.type === "product_list" && part.products.length === 1;
     return (
       <div key={key} className={single ? "max-w-xl" : ""}>
-        <p className="caption-in mb-3 inline-flex items-center gap-2 rounded-full bg-white/90 px-3.5 py-1.5 text-[12.5px] font-semibold text-stone-800 ring-1 ring-black/5">
+        <p className="caption-in mb-3 inline-flex max-w-[calc(100%-3rem)] items-center gap-2 rounded-full bg-white/90 px-3.5 py-1.5 text-[12.5px] font-semibold text-stone-800 ring-1 ring-black/5">
           <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500" aria-hidden="true" />
           {titleFor(part)}
           {part.type === "product_list" && part.products.length > 1 ? (

@@ -9,6 +9,9 @@ export type ToolContext = {
   channel?: "text" | "voice";
   /** The customer's latest message, kept as evidence when they give marketing consent. */
   latestUserText?: string;
+  /** Context for cost-saving caches: never reuse a canned answer mid-cart or mid-order. */
+  cartItemCount?: number;
+  openOrder?: boolean;
 };
 
 export type ToolExecutionResult = {
@@ -22,5 +25,10 @@ export type ToolDefinition = {
   description: string;
   parameters: Record<string, unknown>;
   schema: z.ZodTypeAny;
+  /**
+   * Only reads (event logging aside), so several calls in one model round can run at the same time.
+   * Leave unset for anything that changes the cart, order, profile or session state.
+   */
+  parallelSafe?: boolean;
   execute: (ctx: ToolContext, args: unknown) => Promise<ToolExecutionResult>;
 };

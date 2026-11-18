@@ -12,7 +12,10 @@ import { FloatingActions, hasSlot, pickLatestActions } from "@/components/chat/F
 import { VoiceControlCard } from "@/components/chat/VoiceControlCard";
 import { VoiceDock } from "@/components/chat/VoiceDock";
 import { CardStage } from "@/components/chat/CardStage";
+import { LauncherGlyph } from "@/components/chat/LauncherGlyph";
+import { useMediaQuery, useVisualViewportVars } from "@/components/chat/useViewport";
 import { WelcomeBubble } from "@/components/chat/WelcomeBubble";
+import { toolStatusLabel } from "@/components/chat/toolStatus";
 import {
   useVoiceSession,
   voiceSupport,
@@ -115,6 +118,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const pathname = usePathname();
   /** Product and order cards in the middle of the screen (voice view); hidden on demand. */
   const [cardsOpen, setCardsOpen] = useState(false);
+  useVisualViewportVars(open);
 
   // The assistant can take the customer to a page (a product, checkout). The widget lives in the
   // layout and navigation is client-side, so a voice call carries on.
@@ -136,6 +140,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const [error, setError] = useState<ChatUiError | null>(null);
   const [draft, setDraft] = useState("");
   const [toast, setToast] = useState<string | null>(null);
+  /** The tool the assistant is running in a text or cascade voice turn ("Searching products…"). */
+  const [workingTool, setWorkingTool] = useState<string | null>(null);
   const [busyProductId, setBusyProductId] = useState<string | null>(null);
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
@@ -466,11 +472,17 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
                 return at === -1 ? [...previous, real] : [...previous.slice(0, at), real, ...previous.slice(at)];
               });
             }
+          } else if (event === "message.status") {
+            setWorkingTool((data as { tool?: string })?.tool ?? null);
           } else if (event === "message.delta") {
             const chunk = (data as { text?: string })?.text;
-            if (chunk) appendText(chunk);
+            if (chunk) {
+              setWorkingTool(null);
+              appendText(chunk);
+            }
           } else if (event === "ui.part") {
             const part = (data as { part?: ChatPart })?.part;
+            setWorkingTool(null);
             if (part) addPart(part);
           } else if (event === "ui.cart") {
             const nextCart = (data as { cart?: CartPayload })?.cart;
@@ -529,6 +541,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           ),
         );
       } finally {
+        setWorkingTool(null);
         inflightRef.current -= 1;
         if (inflightRef.current === 0) {
           sendingRef.current = false;
@@ -682,10 +695,13 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       // Order placed, handoff: those arrive as event messages saved by the server.
       void fetchNewMessages();
     },
+    onReplyDiscarded: (replyId) => replaceMessage(`pending-${replyId}`, () => null),
   });
 
   const voiceEngine = session?.settings.voiceAssistant.engine ?? "cascade";
   const voiceSession = voiceEngine === "realtime" ? realtimeVoice : cascadeVoice;
+  // What the assistant is doing during a pause: a live call's tool, or the tool of a text/cascade turn.
+  const workingLabel = toolStatusLabel(voiceEngine === "realtime" && realtimeVoice.active ? realtimeVoice.activeTool : workingTool);
   voiceActiveRef.current = voiceSession.active;
   voiceLangRef.current = cascadeVoice.lang;
   setVoiceLangRef.current = cascadeVoice.setLang;
@@ -705,6 +721,13 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           : null;
 
   const startVoiceAssistant = useCallback(async () => {
+    // A call is already running (the panel was only closed): show it. Priming the audio or starting
+    // again would cut off what the assistant is saying and repeat its greeting.
+    if (voiceActiveRef.current) {
+      setView("voice");
+      setOpen(true);
+      return;
+    }
     // Inside the click: unlock audio before anything is awaited.
     cascadeVoice.prime();
     realtimeVoice.prime();
@@ -836,7 +859,14 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   // talking) once it's open.
   const talking = voiceSession.active && ["hearing", "thinking", "speaking", "listening"].includes(voiceSession.phase);
   const headerOrbState: OrbState = talking ? (voiceSession.phase as OrbState) : "still";
-  const launcherOrbState: OrbState = welcomeSpeaking ? "speaking" : "idle";
+  const callPhase = voiceSession.phase;
+  const launcherOrbState: OrbState = voiceSession.active
+    ? callPhase === "off" || callPhase === "starting"
+      ? "thinking"
+      : callPhase
+    : welcomeSpeaking
+      ? "speaking"
+      : "idle";
 
   // Typed text (composer, chips, forms) during voice mode goes through the voice turn so the answer is spoken.
   const sendTyped = useCallback(
@@ -907,10 +937,15 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     .replace(/\s*…$/, "")
     .trim();
 
+  // Closing only hides the panel: a call keeps speaking and listening until "End" is pressed.
   const closePanel = useCallback(() => {
-    if (voiceSession.active) voiceSession.stop();
+    setError(null);
     setOpen(false);
-  }, [voiceSession]);
+  }, []);
+  const showVoicePanel = useCallback(() => {
+    setView("voice");
+    setOpen(true);
+  }, []);
 
   // A team member is replying: that conversation happens in the text chat. A handoff that is only
   // waiting for someone keeps the voice panel, so the call isn't swapped for the text chat.
@@ -930,6 +965,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     if (cardsKey && cardsKey !== seenCardsRef.current) {
       setCardsOpen(true);
       void playEarcon("card");
+      if (!openRef.current) setUnread((count) => count + 1);
     }
     seenCardsRef.current = cardsKey;
   }, [cardsKey, session]);
@@ -942,6 +978,16 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     if (first === "order_status") return "your order";
     return "details";
   })();
+
+  // Screen fit. Cards go beside the voice panel only when there's room for both next to it; otherwise
+  // they go above it, and the panel shrinks to a slim bar so they get most of the screen.
+  const bothCardSlots = hasSlot(latestCards, "products") && hasSlot(latestCards, "panel");
+  const stageWide = useMediaQuery(bothCardSlots ? "(min-width: 1536px)" : "(min-width: 1024px)");
+  const shortScreen = useMediaQuery("(max-height: 520px)");
+  const fullScreenChat = useMediaQuery("(max-width: 639px), (max-height: 520px)");
+  const cardsShown = cardsOpen && Boolean(latestCards);
+  const compactDock = voiceView && !stageWide && (cardsShown || shortScreen);
+  const chatFillsScreen = open && !voiceView && fullScreenChat;
 
   const uploadFile = useCallback(async (file: Blob, name: string): Promise<{ uploadId: string } | { error: string }> => {
     const form = new FormData();
@@ -1066,7 +1112,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     (name: EngagementTriggerName, event: Record<string, unknown>, isCancelled: () => boolean = () => false) => {
       if (triggerDelay(name) === null) return;
       const send = async (tries: number) => {
-        if (isCancelled() || sendingRef.current || Date.now() - lastChatAtRef.current < 60_000) return;
+        if (isCancelled() || sendingRef.current || voiceActiveRef.current || Date.now() - lastChatAtRef.current < 60_000) return;
         const result = await postEngagement(event);
         if (result?.reason === "wait" && result.retryAfterSeconds && tries < 1 && !isCancelled()) {
           window.setTimeout(() => void send(tries + 1), result.retryAfterSeconds * 1000 + 500);
@@ -1287,6 +1333,23 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     />
   );
 
+  const callControls = (variant: "floating" | "inline") => (
+    <VoiceControlCard
+      variant={variant}
+      phase={voiceSession.phase}
+      level={voiceSession.level}
+      lang={voiceSession.lang}
+      supportsBangla={session?.store.supportedLocales.some((locale) => locale.startsWith("bn")) ?? false}
+      position={position}
+      onExpand={showVoicePanel}
+      onLang={voiceSession.setLang}
+      onInterrupt={voiceSession.interrupt}
+      onPause={voiceSession.pause}
+      onResume={voiceSession.resume}
+      onStop={voiceSession.stop}
+    />
+  );
+
   return (
     <>
       <WelcomeBubble
@@ -1306,7 +1369,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       />
       {voiceView ? (
         <CardStage
-          open={cardsOpen && Boolean(latestCards)}
+          open={cardsShown}
+          wide={stageWide}
           position={position}
           products={hasSlot(latestCards, "products") ? floatingActions("products") : null}
           panel={hasSlot(latestCards, "panel") ? floatingActions("panel") : null}
@@ -1315,6 +1379,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       ) : null}
       {voiceView ? (
         <VoiceDock
+          compact={compactDock}
+          position={position}
           assistantName={session?.settings.assistantName ?? "Shopping assistant"}
           accent={accent}
           phase={voiceSession.phase}
@@ -1322,6 +1388,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           active={voiceSession.active}
           caption={caption}
           captionKey={latestReply?.id ?? "none"}
+          workingLabel={workingLabel}
           lang={voiceSession.lang}
           supportsBangla={session?.store.supportedLocales.some((locale) => locale.startsWith("bn")) ?? false}
           voiceAvailable={Boolean(voiceSpeech) || !session}
@@ -1388,10 +1455,13 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         onRemove={removeCartItem}
         onCheckout={(details) => void startCheckout(details)}
         orbState={headerOrbState}
+        workingLabel={workingLabel}
         confirmingOrder={confirmingOrder}
         onConfirmOrder={(confirmationId) => void confirmOrder(confirmationId)}
         onSuggestionAction={onSuggestionAction}
         closedSuggestions={closedSuggestions}
+        fullScreen={fullScreenChat}
+        callBar={voiceSession.active && fullScreenChat ? callControls("inline") : null}
         voiceAssistant={{
           available: Boolean(voiceSpeech),
           active: voiceSession.active,
@@ -1399,19 +1469,39 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         }}
       />
 
-      {voiceSession.active && open && !voiceView ? (
-        <VoiceControlCard
-          phase={voiceSession.phase}
-          level={voiceSession.level}
-          lang={voiceSession.lang}
-          supportsBangla={session?.store.supportedLocales.some((locale) => locale.startsWith("bn")) ?? false}
-          position={position}
-          onLang={voiceSession.setLang}
-          onInterrupt={voiceSession.interrupt}
-          onPause={voiceSession.pause}
-          onResume={voiceSession.resume}
-          onStop={voiceSession.stop}
-        />
+      {voiceSession.active && !voiceView && !chatFillsScreen ? callControls("floating") : null}
+
+      {/* The panel is closed but something needs the customer: a dropped call, or cards to look at. */}
+      {!open && error ? (
+        <div
+          role="alert"
+          className={`fixed bottom-[88px] z-[61] flex max-w-[min(300px,calc(100vw-32px))] animate-pop items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-[12.5px] text-red-800 shadow-xl ${
+            position === "left" ? "left-4" : "right-4"
+          }`}
+        >
+          <p>{error.message}</p>
+          <button
+            type="button"
+            aria-label="Dismiss message"
+            onClick={() => setError(null)}
+            className="-mr-1 shrink-0 rounded-full p-0.5 text-red-400 hover:text-red-700"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      ) : voiceSession.active && !open && cardsShown ? (
+        <button
+          type="button"
+          onClick={showVoicePanel}
+          className={`fixed bottom-[88px] z-[61] flex max-w-[min(300px,calc(100vw-32px))] animate-pop items-center gap-2 rounded-2xl border border-stone-200 bg-white px-3.5 py-2.5 text-[13px] font-semibold text-stone-800 shadow-xl ${
+            position === "left" ? "left-4" : "right-4"
+          }`}
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500" aria-hidden="true" />
+          Tap to see {cardsLabel}
+        </button>
       ) : null}
 
       {nudge && !open ? (
@@ -1451,6 +1541,9 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           setError(null);
           if (open) {
             closePanel();
+          } else if (voiceSession.active) {
+            // Back to the running call, in whichever view the customer left it.
+            setOpen(true);
           } else {
             // One tap: open and start talking.
             void startVoiceAssistant();
@@ -1459,41 +1552,32 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         onPointerEnter={warmUpVoice}
         onTouchStart={warmUpVoice}
         onFocus={warmUpVoice}
-        aria-label={open ? "Close shopping assistant" : "Talk to the AI shopping assistant"}
+        aria-label={
+          open
+            ? voiceSession.active
+              ? "Minimize assistant, the call continues"
+              : "Close shopping assistant"
+            : voiceSession.active
+              ? "Voice call in progress, open assistant"
+              : "Talk to the AI shopping assistant"
+        }
         aria-expanded={open}
+        data-call-state={voiceSession.active && !open ? launcherOrbState : undefined}
         className={`fixed bottom-5 z-[60] rounded-full transition duration-200 hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
           position === "left" ? "left-5" : "right-5"
-        }`}
+        } ${compactDock || chatFillsScreen ? "hidden" : ""}`}
       >
         {open ? (
-          // Panel open: the launcher closes it (and ends a call).
+          // Panel open: the launcher closes it; a call carries on, so it reads as "minimize" then.
           <span className="flex h-[60px] w-[60px] animate-pop items-center justify-center rounded-full bg-stone-900 text-white">
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.4">
-              <path d="M18 6 6 18M6 6l12 12" />
+              <path d={voiceSession.active ? "m6 9 6 6 6-6" : "M18 6 6 18M6 6l12 12"} />
             </svg>
           </span>
         ) : (
           <>
-            <AssistantOrb size={60} state={launcherOrbState} accent={accent} />
-            <span className="pointer-events-none absolute inset-0 flex items-center justify-center gap-[3px] text-white drop-shadow">
-              {launcherOrbState === "speaking" ? (
-                [0, 1, 2, 3, 4].map((bar) => (
-                  <span key={bar} className="voice-bar h-5" style={{ animationDelay: `${bar * 110}ms` }} aria-hidden="true" />
-                ))
-              ) : (
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  className="h-5 w-5 opacity-90"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                >
-                  <rect x="9" y="3" width="6" height="11" rx="3" />
-                  <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-                </svg>
-              )}
-            </span>
+            <AssistantOrb size={60} state={launcherOrbState} level={voiceSession.level} accent={accent} />
+            <LauncherGlyph state={launcherOrbState} level={voiceSession.level} inCall={voiceSession.active} />
           </>
         )}
         {!open && unread > 0 ? (

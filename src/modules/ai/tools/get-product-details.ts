@@ -21,13 +21,14 @@ export const getProductDetailsTool: ToolDefinition = {
     },
   },
   schema,
+  parallelSafe: true,
   async execute(ctx, args) {
     const input = schema.parse(args);
     const product = await getProductById(ctx.session.storeId, input.productId);
     if (!product) {
       return failure("product_not_found", "That product is not available in this store.");
     }
-    await trackEvent({
+    void trackEvent({
       storeId: ctx.session.storeId,
       sessionId: ctx.session.sessionId,
       visitorId: ctx.session.visitorId,

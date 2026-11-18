@@ -88,3 +88,23 @@ describe("tool executor", () => {
     expect(result.ui?.map((part) => part.type)).toEqual(["cart_summary", "details_form"]);
   });
 });
+
+describe("add_to_cart by position", () => {
+  it("adds the product at that number of the latest list on screen", async () => {
+    const { appendMessage } = await import("@/modules/conversations/conversation.service");
+    const session = await newSession();
+    const shown = await executeTool({ session }, "search_products", JSON.stringify({ query: "tote scarf" }));
+    const listed = (shown.ui ?? []).find((part) => part.type === "product_list");
+    expect(listed && listed.type === "product_list" ? listed.products.length : 0).toBeGreaterThan(1);
+    await appendMessage({ conversationId: session.conversationId, role: "assistant", content: "Two options.", parts: shown.ui ?? [] });
+
+    const second = listed && listed.type === "product_list" ? listed.products[1]! : null;
+    const result = await executeTool({ session }, "add_to_cart", JSON.stringify({ position: 2 }));
+    expect(result.ok).toBe(true);
+    const cart = await getCartSummary(session.sessionId, session.storeId, "BDT");
+    expect(cart.items.map((item) => item.productId)).toEqual([second!.id]);
+
+    const missing = await executeTool({ session }, "add_to_cart", JSON.stringify({ position: 9 }));
+    expect(missing.content).toMatchObject({ ok: false, error: { code: "position_not_found" } });
+  });
+});

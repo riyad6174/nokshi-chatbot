@@ -58,25 +58,26 @@ async function browseSelection(
 export const searchProductsTool: ToolDefinition = {
   name: "search_products",
   description:
-    "Search the store's active catalog. Use for every recommendation, availability or price question. Call it with NO query to show all products (\"what do you have?\", \"সব প্রোডাক্ট দেখান\"). Returns products plus `facets` (brands, colors, sizes, materials present in the results). When there are several matches, ask ONE short question using the facets to narrow down (e.g. which color or brand), then search again with `filters`/`brand`. Prices are integers in minor units (100 = 1 BDT).",
+    "Search the catalog. Use for every product, availability or price question; NO query shows a selection of all products. Returns products and `facets` (brands, colors, sizes, materials in the results). With several matches, ask ONE short question from the facets, then search again with `filters`/`brand`. Price filters are in minor units (100 = 1 BDT).",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {
-      query: { type: "string", description: "Free text in English catalog words (translate Bangla: ব্যাগ -> bag, ঘড়ি -> watch, জামা -> clothing), e.g. 'backpack', 'gift for dad', 'cotton panjabi'. Search several items in one call: 'bag clothing'." },
-      category: { type: "string", description: "Category filter, e.g. Bags, Electronics, Clothing, Home, Accessories." },
+      query: { type: "string", description: "English catalog words (translate Bangla: ব্যাগ -> bag, জামা -> clothing), e.g. 'gift for dad'. Several items in one call: 'bag clothing'." },
+      category: { type: "string", description: "Category filter, e.g. Bags, Clothing." },
       brand: { type: "string", description: "Brand filter." },
       filters: {
         type: "object",
         description: "Narrow by variant option or attribute, e.g. {\"color\":\"Black\"} or {\"material\":\"canvas\"}.",
         additionalProperties: { type: "string" },
       },
-      minPriceMinor: { type: "integer", minimum: 0, description: "Minimum unit price in minor units." },
-      maxPriceMinor: { type: "integer", minimum: 0, description: "Maximum unit price in minor units. 300000 = 3,000 BDT." },
-      limit: { type: "integer", minimum: 1, maximum: 8, description: "Number of products to return (default 6)." },
+      minPriceMinor: { type: "integer", minimum: 0 },
+      maxPriceMinor: { type: "integer", minimum: 0, description: "300000 = 3,000 BDT." },
+      limit: { type: "integer", minimum: 1, maximum: 8, description: "Default 6." },
     },
   },
   schema,
+  parallelSafe: true,
   async execute(ctx, args) {
     const input = schema.parse(args);
     const run = (text: string | undefined, category: string | undefined) =>
@@ -107,7 +108,7 @@ export const searchProductsTool: ToolDefinition = {
         {
           matched: selection.length > 0,
           count: selection.length,
-          products: selection.map(productCompact),
+          products: selection.map((product) => productCompact(product, { brief: true })),
           storeCategories: categories,
           note:
             selection.length > 0
@@ -184,7 +185,7 @@ export const searchProductsTool: ToolDefinition = {
     }
     const facets = matched && products.length > 1 ? computeFacets(products) : [];
     if (asked) {
-      await trackEvent({
+      void trackEvent({
         storeId: ctx.session.storeId,
         sessionId: ctx.session.sessionId,
         visitorId: ctx.session.visitorId,
@@ -209,7 +210,7 @@ export const searchProductsTool: ToolDefinition = {
       {
         matched,
         count: products.length,
-        products: products.map(productCompact),
+        products: products.map((product) => productCompact(product, { brief: products.length > 2 })),
         facets,
         storeCategories: categories,
         note: matched

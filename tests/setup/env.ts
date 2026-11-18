@@ -6,3 +6,5 @@ process.env.WIDGET_PUBLIC_KEY = "test-widget-key";
 process.env.AI_API_KEY = "";
 process.env.COMMERCE_PROVIDER = "internal";
 process.env.COMMERCE_TRUSTED_HOSTS = "";
+// Tests write products straight to the database, past the cache invalidation hooks.
+process.env.CATALOG_CACHE_TTL_MS = "0";

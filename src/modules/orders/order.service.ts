@@ -5,7 +5,7 @@ import { isObjectId } from "@/lib/db/ids";
 import { phoneDigits } from "@/lib/digits";
 import { logger } from "@/lib/logging/logger";
 import type { CheckoutLineSnapshot } from "@/modules/commerce/commerce-adapter";
-import { variantPriceMinor } from "@/modules/catalog/product.service";
+import { invalidateCatalog, variantPriceMinor } from "@/modules/catalog/product.service";
 import { trackEvent } from "@/modules/customers/events.service";
 import { recordOrderOnProfile } from "@/modules/customers/profile.service";
 import type { OrderStatusData } from "@/types/chat";
@@ -241,6 +241,7 @@ export async function placeOrderFromCheckout(input: PlaceOrderInput): Promise<Or
       }, TX_OPTIONS);
 
       logger.info("order.placed", { storeId: store.id, orderId: order.id, totalMinor: order.totalMinor, lines: lines.length });
+      invalidateCatalog(store.id); // stock was reserved
       await announceInChat(order);
       await recordOrderOnProfile(order);
       if (order.sessionId) {
@@ -411,6 +412,7 @@ export async function updateOrderStatus(input: {
     return tx.order.update({ where: { id: order.id }, data });
   }, TX_OPTIONS);
 
+  if (input.status === "cancelled") invalidateCatalog(order.storeId); // stock was returned
   logger.info("order.status_changed", { orderId: order.id, from: order.status, to: input.status, by: input.by });
 
   if (updated.conversationId) {

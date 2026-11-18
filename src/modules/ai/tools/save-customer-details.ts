@@ -15,7 +15,7 @@ const schema = customerDetailsSchema.extend({
 export const saveCustomerDetailsTool: ToolDefinition = {
   name: "save_customer_details",
   description:
-    "Save the delivery details the customer typed in chat (name, phone, address) and prepare checkout with the current cart. Only call after the customer confirmed the cart and gave these details themselves; never guess them. This does NOT place the order: the customer reviews and places it on the checkout page by tapping the checkout button.",
+    "Save the delivery details the customer typed (name, phone, address) and prepare checkout with the cart. Only after they confirmed the cart and gave the details themselves. Does NOT place the order: they place it on the checkout page.",
   parameters: {
     type: "object",
     additionalProperties: false,

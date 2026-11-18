@@ -15,6 +15,8 @@ import {
   type NormalizedProduct,
 } from "@/modules/catalog/product-sync.service";
 import { getPrimaryStore, parseJsonObject } from "@/modules/stores/store.service";
+import { isObjectId } from "@/lib/db/ids";
+import { recordPromptVersion, restorePromptVersion } from "@/modules/ai/prompt-versions.service";
 
 const PATH = "/admin/chatbot";
 
@@ -23,6 +25,11 @@ async function adminStore() {
   const store = await getPrimaryStore();
   if (!store) redirect("/admin?error=store");
   return store;
+}
+
+async function adminLabel(): Promise<string> {
+  const user = await requireAdmin();
+  return user.name || user.email;
 }
 
 function done(tab: string, error?: string): never {
@@ -155,6 +162,16 @@ export async function savePersonalityAction(formData: FormData) {
     where: { storeId: store.id },
     data: { ...parsed.data, suggestedTopics: JSON.stringify(topics) },
   });
+  await recordPromptVersion({ storeId: store.id, content: parsed.data.systemInstructions, createdBy: await adminLabel() });
+  done("personality");
+}
+
+export async function restorePromptVersionAction(formData: FormData) {
+  const store = await adminStore();
+  const versionId = String(formData.get("versionId") || "");
+  if (!isObjectId(versionId)) done("personality", "Version not found.");
+  const restored = await restorePromptVersion({ storeId: store.id, versionId, createdBy: await adminLabel() });
+  logger.info("admin.prompt_version_restored", { storeId: store.id, versionId, newVersion: restored?.version ?? null });
   done("personality");
 }
 

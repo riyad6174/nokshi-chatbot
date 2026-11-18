@@ -32,7 +32,8 @@ const schema = z.object({
 
 export const saveCustomerProfileTool: ToolDefinition = {
   name: "save_customer_profile",
-  description: `Remember facts the customer shared, as soon as they share them, so they never have to repeat them: name, phone, email, delivery address, city, delivery area, interests (product types, styles, occasions), budget. Only save what they actually said. marketingConsent: set it ONLY when your previous message asked exactly: "${CONSENT_QUESTION}" and the customer's latest message clearly answers it (granted true for a clear yes, with the channels they agreed to; granted false for no). Never assume consent. Call silently; don't announce that you saved anything.`,
+  // Kept under the 420-character limit in getProviderTools, so the consent rule is never cut off.
+  description: `Silently save what the customer said, the moment they say it (only what they actually said): contact details, interests, budget. marketingConsent: ONLY when your previous message asked exactly "${CONSENT_QUESTION}" and their latest message clearly answers it (true with the channels for yes, false for no). Never assume consent.`,
   parameters: {
     type: "object",
     additionalProperties: false,

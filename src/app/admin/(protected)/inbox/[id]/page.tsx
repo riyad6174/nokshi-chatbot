@@ -3,12 +3,14 @@ import { notFound } from "next/navigation";
 import { AdminBanner } from "@/components/dashboard/AdminBanner";
 import { AgentReplyBox } from "@/components/dashboard/AgentReplyBox";
 import { AutoRefresh } from "@/components/dashboard/AutoRefresh";
+import { ConversationScroll } from "@/components/dashboard/ConversationScroll";
 import { ConversationStatusBadge } from "@/components/dashboard/ConversationStatusBadge";
 import { closeAction, releaseAction, takeOverAction } from "@/app/admin/inbox-actions";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db/prisma";
 import { formatMinor } from "@/lib/money";
 import { getCartSummary } from "@/modules/cart/cart.service";
+import { getConversationUsage } from "@/modules/analytics/usage.service";
 import { getConversationDetail, toChatMessage } from "@/modules/conversations/conversation.service";
 import { markRead } from "@/modules/conversations/handoff.service";
 import { conversationDigest } from "@/modules/conversations/summary.service";
@@ -122,11 +124,19 @@ export default async function InboxConversationPage({
   if (!conversation) notFound();
   await markRead(store.id, conversation.id);
 
-  const [cart, orders, digest] = await Promise.all([
+  const [cart, orders, digest, usage, gaps] = await Promise.all([
     getCartSummary(conversation.session.id, store.id, store.currency),
     prisma.order.findMany({ where: { storeId: store.id, sessionId: conversation.session.id }, orderBy: { createdAt: "desc" }, take: 5 }),
     // Lets an agent catch up quickly after a handoff.
     conversationDigest(conversation.id).catch(() => ""),
+    getConversationUsage(store.id, conversation.id),
+    // Questions from this chat the assistant couldn't answer: teach them in Knowledge.
+    prisma.unansweredQuestion.findMany({
+      where: { storeId: store.id, conversationId: conversation.id, status: { in: ["new", "reviewing"] } },
+      orderBy: { lastAskedAt: "desc" },
+      take: 5,
+      select: { id: true, question: true, occurrences: true },
+    }),
   ]);
   const messages = conversation.messages.map(toChatMessage);
   const closed = conversation.status === "closed";
@@ -184,11 +194,16 @@ export default async function InboxConversationPage({
             </p>
           ) : null}
 
-          <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
-            {messages.map((message) => (
-              <Bubble key={message.id} message={message} />
-            ))}
-          </div>
+          {/* min-h-0: the list scrolls inside the panel instead of being squeezed out by the reply box. */}
+          <ConversationScroll messageCount={messages.length} className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
+            {messages.length === 0 ? (
+              <p className="py-10 text-center text-[12px] text-stone-500">
+                No messages in this chat yet. The customer opened the assistant but hasn&apos;t written anything.
+              </p>
+            ) : (
+              messages.map((message) => <Bubble key={message.id} message={message} />)
+            )}
+          </ConversationScroll>
 
           <AgentReplyBox conversationId={conversation.id} disabled={closed} />
         </section>
@@ -200,6 +215,55 @@ export default async function InboxConversationPage({
               <ul className="mt-1 space-y-1 text-stone-600">
                 {digest.split("\n").map((line) => (
                   <li key={line}>{line.replace(/^- /, "")}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <div className="rounded-xl border border-stone-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-[12px] font-semibold text-stone-900">AI usage</h2>
+              <Link href="/admin/ai-usage" className="text-[10px] text-stone-500 underline-offset-2 hover:underline">
+                Details
+              </Link>
+            </div>
+            {usage ? (
+              <>
+                <p className="mt-1 text-[16px] font-semibold tabular-nums text-stone-900">
+                  ${(usage.costMicros / 1_000_000).toFixed(4)}
+                </p>
+                <p className="mt-0.5 text-stone-500">
+                  {usage.totalTokens.toLocaleString("en-US")} tokens · {usage.eventCount} request
+                  {usage.eventCount === 1 ? "" : "s"}
+                </p>
+                {usage.unpricedEventCount > 0 ? (
+                  <p className="mt-1 text-[10.5px] text-amber-700">
+                    {usage.unpricedEventCount} unpriced · add model pricing
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="mt-1 text-stone-500">No AI usage recorded</p>
+            )}
+          </div>
+          {gaps.length > 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-[12px] font-semibold text-stone-900">Knowledge gaps</h2>
+                <Link
+                  href="/admin/knowledge?tab=questions"
+                  className="text-[10px] text-stone-500 underline-offset-2 hover:underline"
+                >
+                  Teach
+                </Link>
+              </div>
+              <ul className="mt-1.5 space-y-1 text-stone-700">
+                {gaps.map((gap) => (
+                  <li key={gap.id} className="break-words">
+                    &ldquo;{gap.question}&rdquo;
+                    {gap.occurrences > 1 ? (
+                      <span className="ml-1 text-[10px] text-stone-500">asked {gap.occurrences}×</span>
+                    ) : null}
+                  </li>
                 ))}
               </ul>
             </div>

@@ -45,6 +45,8 @@ type MessageListProps = {
   onSuggestionAction?: (suggestionId: string, action: "dismiss" | "opt_out") => void;
   /** Suggestions the customer already answered (their buttons are hidden). */
   closedSuggestions?: ReadonlySet<string>;
+  /** What the assistant is doing right now ("Searching products…"), shown while it works. */
+  workingLabel?: string | null;
 };
 
 type ActionKind = "products" | "cart" | "checkout" | "delivery" | "order" | "tracking";
@@ -321,10 +323,13 @@ export function MessageList({
   voiceActive = false,
   onSuggestionAction,
   closedSuggestions,
+  workingLabel = null,
 }: MessageListProps) {
   const hasCustomerMessage = messages.some((message) => message.role === "user");
   const hasAssistantMessage = messages.some((message) => message.role === "assistant");
   const lastId = messages[messages.length - 1]?.id;
+  const lastMessage = messages[messages.length - 1];
+  const lastHasContent = Boolean(lastMessage && lastMessage.role !== "user" && lastMessage.parts.some((part) => part.type !== "text" || part.text.trim()));
 
   // Only the newest order summary can be confirmed, and only until an order is placed after it.
   const hasConfirmation = (message: ChatMessage) => message.parts.some((part) => part.type === "order_confirmation");
@@ -502,7 +507,7 @@ export function MessageList({
               type="button"
               onClick={() => onSuggestion(topic.prompt)}
               disabled={sending}
-              className="animate-pop rounded-full border bg-white px-3 py-1.5 text-[11.5px] font-medium text-stone-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow active:scale-95 disabled:opacity-50"
+              className="animate-pop rounded-full border bg-white px-3 py-1.5 text-[11.5px] font-medium text-stone-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow active:scale-95 disabled:opacity-50 touch:py-2 touch:text-[12.5px]"
               style={{ borderColor: `${accent}40`, animationDelay: `${150 + index * 70}ms` }}
             >
               {topic.label}
@@ -584,6 +589,7 @@ export function MessageList({
                   <span key={delay} className="h-1.5 w-1.5 animate-typing-dot rounded-full bg-stone-400" style={{ animationDelay: `${delay}ms` }} />
                 ))}
               </span>
+              {workingLabel ? <span className="text-[12px] text-stone-500 animate-fade-up">{workingLabel}</span> : null}
             </div>
           ) : null;
         }
@@ -594,6 +600,14 @@ export function MessageList({
           </div>
         );
       })}
+
+      {/* A tool running after the reply already started (e.g. adding to the cart after "Sure!"). */}
+      {sending && workingLabel && lastHasContent ? (
+        <div key={workingLabel} className="flex items-center gap-2 pl-7 text-[12px] text-stone-500 animate-fade-up" role="status">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500" aria-hidden="true" />
+          {workingLabel}
+        </div>
+      ) : null}
     </div>
   );
 }

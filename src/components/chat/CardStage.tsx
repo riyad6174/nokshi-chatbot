@@ -1,20 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-
-const WIDE_QUERY = "(min-width: 1024px)";
-
-function useWideScreen(): boolean {
-  const [wide, setWide] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia(WIDE_QUERY);
-    const update = () => setWide(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return wide;
-}
+import { useEffect, type ReactNode } from "react";
 
 /**
  * Cards over a blurred page; the blur is only there while cards are shown. The voice panel stays
@@ -22,16 +8,20 @@ function useWideScreen(): boolean {
  *
  * Wide screens: products fill the space from the left of the screen; the cart, forms and order cards
  * sit right beside the voice panel, bottom-aligned with it. Smaller screens: both in the space above
- * the voice panel. Tap the background, the close button or press Escape to hide them.
+ * the voice panel, which shrinks to a slim bar so the cards get most of the screen. Tap the
+ * background, the close button or press Escape to hide them.
  */
 export function CardStage({
   open,
+  wide,
   position,
   products,
   panel,
   onClose,
 }: {
   open: boolean;
+  /** Enough room to lay the cards out beside the voice panel. */
+  wide: boolean;
   position: "left" | "right";
   /** The product grid (or a single product), or null. */
   products: ReactNode;
@@ -39,8 +29,6 @@ export function CardStage({
   panel: ReactNode;
   onClose: () => void;
 }) {
-  const wide = useWideScreen();
-
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -114,11 +102,12 @@ export function CardStage({
           role="dialog"
           aria-label="Products and order"
           aria-hidden={!open}
-          className={`chat-scroll fixed inset-x-3 top-3 z-[55] flex flex-col gap-3 overflow-y-auto transition duration-300 ease-out sm:inset-x-6 ${visibility} ${lift}`}
-          // Down to just above the voice panel (bottom offset + its measured height).
-          style={{ bottom: "calc(5.75rem + var(--voice-dock-h, 26rem) + 0.75rem)" }}
+          className={`chat-scroll fixed inset-x-3 z-[55] flex flex-col gap-3 overflow-y-auto overscroll-contain transition duration-300 ease-out sm:inset-x-6 ${visibility} ${lift}`}
+          // Down to just above the slim voice bar (its bottom offset + its measured height).
+          style={{ top: "calc(var(--vv-top, 0px) + 0.75rem)", bottom: "calc(var(--vv-bottom, 0px) + 0.5rem + var(--voice-dock-h, 5rem) + 0.5rem)" }}
         >
-          <div className="sticky top-0 z-10 flex justify-end">{closeButton}</div>
+          {/* With products alone, the button shares a row with their title instead of taking its own. */}
+          <div className={`sticky top-0 z-10 flex justify-end ${panel ? "" : "-mb-12"}`}>{closeButton}</div>
           {panel}
           {products}
         </div>

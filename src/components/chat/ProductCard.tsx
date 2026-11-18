@@ -55,7 +55,7 @@ function VariantChips({
             disabled={!variant.available}
             onClick={() => onSelect(variant.id)}
             title={variant.available ? variant.title : `${variant.title}: sold out`}
-            className={`max-w-full truncate rounded-full border px-2 transition ${compact ? "py-0.5 text-[10.5px]" : "py-1 text-[11px]"} ${
+            className={`max-w-full truncate rounded-full border px-2 transition touch:px-2.5 touch:py-1.5 touch:text-[12px] ${compact ? "py-0.5 text-[10.5px]" : "py-1 text-[11px]"} ${
               selected
                 ? "font-semibold text-white"
                 : variant.available
@@ -115,7 +115,7 @@ function AddButton({
       type="button"
       onClick={onClick}
       disabled={!canAdd || busy}
-      className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-[12px] font-semibold text-white transition hover:brightness-110 active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-stone-300 disabled:opacity-80"
+      className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-[12px] font-semibold text-white transition hover:brightness-110 active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-stone-300 disabled:opacity-80 touch:py-2.5 touch:text-[13px]"
       style={canAdd ? { backgroundColor: accent } : undefined}
     >
       {busy ? (
@@ -156,8 +156,8 @@ export function ProductCard({ product, accent, busy, index = 0, layout = "row", 
         </div>
         <div className="flex flex-1 flex-col gap-1.5 p-2.5">
           <div className="min-w-0">
-            {meta ? <p className="truncate text-[9.5px] font-semibold uppercase tracking-[0.12em] text-stone-400">{meta}</p> : null}
-            <p className="truncate text-[13px] font-semibold text-stone-900" title={product.name}>
+            {meta ? <p className="truncate text-[9.5px] font-semibold uppercase tracking-[0.12em] text-stone-400 touch:text-[10.5px]">{meta}</p> : null}
+            <p className="line-clamp-2 text-[13px] font-semibold leading-snug text-stone-900 touch:text-[14px]" title={product.name}>
               {product.name}
             </p>
           </div>
@@ -172,7 +172,7 @@ export function ProductCard({ product, accent, busy, index = 0, layout = "row", 
               disabled={!canAdd || busy}
               aria-label={canAdd ? `Add ${product.name} to cart` : `${product.name} is sold out`}
               title={canAdd ? "Add to cart" : "Sold out"}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition hover:scale-105 hover:brightness-110 active:scale-90 disabled:cursor-not-allowed disabled:bg-stone-300"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition hover:scale-105 hover:brightness-110 active:scale-90 disabled:cursor-not-allowed disabled:bg-stone-300 touch:h-11 touch:w-11"
               style={canAdd ? { backgroundColor: accent } : undefined}
             >
               {busy ? (

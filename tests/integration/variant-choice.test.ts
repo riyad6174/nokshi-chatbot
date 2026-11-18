@@ -55,7 +55,7 @@ describe("adding a product whose other version is sold out", () => {
 });
 
 describe("the assistant remembers what it showed", () => {
-  it("keeps product and version ids from earlier replies in its history", async () => {
+  it("keeps product ids and version names from earlier replies in its history", async () => {
     const { appendMessage, getProviderHistory } = await import("@/modules/conversations/conversation.service");
     const session = await newSession();
     const shown = await executeTool({ session }, "search_products", JSON.stringify({ query: "watch" }));
@@ -64,7 +64,9 @@ describe("the assistant remembers what it showed", () => {
     const history = await getProviderHistory(session.conversationId);
     const memory = history.find((entry) => entry.role === "assistant")!.content;
     expect(memory).toContain(`productId=${watch.id}`);
-    expect(memory).toContain(`Silver / Tan leather (variantId=${watch.silver}, in stock)`);
-    expect(memory).toContain(`Black / Black leather (variantId=${watch.black}, sold out)`);
+    // Versions by name (add_to_cart resolves them), without the long ids.
+    expect(memory).toContain("Silver / Tan leather (in stock)");
+    expect(memory).not.toContain(watch.silver);
+    expect(memory).toContain("Black / Black leather (sold out)");
   });
 });

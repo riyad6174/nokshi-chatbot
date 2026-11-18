@@ -54,21 +54,27 @@ function StatusIndicator({ phase, level }: { phase: VoicePhase; level: number })
 }
 
 /**
- * Voice-mode controls, floating beside the assistant button: status, language and pause/end.
- * Deliberately minimal: the reply is heard, not read, and the conversation stays in the chat.
+ * Voice-mode controls: status, language and pause/end. Floats beside the assistant button (also while
+ * the panel is closed, so a running call can always be seen and ended), or sits as a strip inside a
+ * full-screen chat. Deliberately minimal: the reply is heard, not read, and the conversation stays in the chat.
  */
 export function VoiceControlCard({
+  variant = "floating",
   phase,
   level,
   lang,
   supportsBangla,
   position,
+  onExpand,
   onLang,
   onInterrupt,
   onPause,
   onResume,
   onStop,
 }: {
+  variant?: "floating" | "inline";
+  /** Tapping the status opens the voice panel. */
+  onExpand: () => void;
   phase: VoicePhase;
   /** Microphone level 0..1 (cloud speech mode). */
   level: number;
@@ -82,21 +88,37 @@ export function VoiceControlCard({
   onResume: () => void;
   onStop: () => void;
 }) {
+  const floating = variant === "floating";
   return (
     <div
       role="toolbar"
       aria-label="Voice assistant controls"
-      className={`fixed bottom-[1.6rem] z-[60] flex max-w-[calc(100vw-6.5rem)] animate-slide-in items-center gap-1.5 rounded-2xl border border-stone-200 bg-white/95 py-1.5 pl-3 pr-1.5 shadow-panel backdrop-blur ${
-        position === "left" ? "left-[5.6rem]" : "right-[5.6rem]"
+      className={`flex items-center gap-1.5 ${
+        floating
+          ? `fixed bottom-[1.6rem] z-[60] max-w-[calc(100vw-6.5rem)] animate-slide-in rounded-2xl border border-stone-200 bg-white/95 py-1.5 pl-3 pr-1.5 shadow-panel backdrop-blur ${
+              position === "left" ? "left-[5.6rem]" : "right-[5.6rem]"
+            }`
+          : "border-b border-stone-200 bg-stone-50 px-3 py-1.5"
       }`}
     >
-      <span className="flex min-w-[104px] items-center gap-1.5" aria-live="polite">
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-label={`${LABELS[phase]}. Open voice assistant`}
+        className={`flex min-w-0 items-center gap-1.5 text-left ${floating ? "sm:min-w-[104px]" : "flex-1"}`}
+      >
         <StatusIndicator phase={phase} level={level} />
-        <span className="truncate text-[12px] font-semibold text-stone-800">{LABELS[phase]}</span>
-      </span>
+        <span className="truncate text-[12px] font-semibold text-stone-800" aria-live="polite">
+          {LABELS[phase]}
+        </span>
+      </button>
 
       {supportsBangla ? (
-        <div className="flex overflow-hidden rounded-full bg-stone-100 p-0.5 text-[11px] font-semibold" role="group" aria-label="Voice language">
+        <div
+          className={`overflow-hidden rounded-full bg-stone-100 p-0.5 text-[11px] font-semibold ${floating ? "hidden sm:flex" : "flex"}`}
+          role="group"
+          aria-label="Voice language"
+        >
           {(["bn", "en"] as const).map((option) => (
             <button
               key={option}
@@ -115,12 +137,13 @@ export function VoiceControlCard({
         <button
           type="button"
           onClick={onInterrupt}
-          className="flex h-8 items-center gap-1 rounded-full bg-stone-900 px-2.5 text-[11.5px] font-semibold text-white transition hover:bg-stone-700"
+          aria-label="Stop"
+          className="flex h-9 w-9 shrink-0 items-center justify-center gap-1 rounded-full bg-stone-900 text-[11.5px] font-semibold text-white transition hover:bg-stone-700 sm:h-8 sm:w-auto sm:px-2.5"
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor">
             <rect x="6" y="6" width="12" height="12" rx="2" />
           </svg>
-          Stop
+          <span className="hidden sm:inline">Stop</span>
         </button>
       ) : null}
       <button
@@ -128,7 +151,7 @@ export function VoiceControlCard({
         onClick={phase === "paused" ? onResume : onPause}
         aria-label={phase === "paused" ? "Resume" : "Pause"}
         title={phase === "paused" ? "Resume" : "Pause"}
-        className="flex h-8 w-8 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 hover:text-stone-900"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 sm:h-8 sm:w-8"
       >
         {phase === "paused" ? (
           <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
@@ -145,12 +168,12 @@ export function VoiceControlCard({
         onClick={onStop}
         aria-label="End voice"
         title="End voice"
-        className="flex h-8 items-center gap-1 rounded-full bg-red-500 px-2.5 text-[11.5px] font-semibold text-white transition hover:bg-red-600"
+        className="flex h-9 w-9 shrink-0 items-center justify-center gap-1 rounded-full bg-red-500 text-[11.5px] font-semibold text-white transition hover:bg-red-600 sm:h-8 sm:w-auto sm:px-2.5"
       >
         <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor">
           <path d="M12 9c-3.6 0-6.9 1.3-9.3 3.5-.4.4-.4 1 0 1.4l2 2c.4.4 1 .4 1.4.1l2.3-1.7c.3-.2.4-.5.4-.8V11.6a12 12 0 0 1 6.4 0v1.9c0 .3.1.6.4.8l2.3 1.7c.4.3 1 .3 1.4-.1l2-2c.4-.4.4-1 0-1.4A13.3 13.3 0 0 0 12 9z" />
         </svg>
-        End
+        <span className="hidden sm:inline">End</span>
       </button>
     </div>
   );

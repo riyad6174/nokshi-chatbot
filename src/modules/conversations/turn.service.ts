@@ -1,10 +1,12 @@
+import { randomUUID } from "node:crypto";
 import type { Conversation, MessageAttachment } from "@prisma/client";
 import { logger } from "@/lib/logging/logger";
 import { prisma } from "@/lib/db/prisma";
 import {
   appendMessage,
+  buildProviderHistory,
   conversationMode,
-  getProviderHistory,
+  getProviderHistoryRows,
   listConversationMessages,
 } from "@/modules/conversations/conversation.service";
 import { recordTurnOutcome, requestHandoff, wantsHuman } from "@/modules/conversations/handoff.service";
@@ -14,9 +16,12 @@ import { isLiveAiEnabled, runAssistant } from "@/modules/ai/run";
 import { resolveAiConfig } from "@/modules/ai/config";
 import type { ToolLogEntry } from "@/modules/ai/orchestrator";
 import { recordAiTurn } from "@/modules/analytics/turn-log.service";
-import { summarizeEarlierMessages } from "@/modules/conversations/summary.service";
+import { recordUsage } from "@/modules/analytics/usage.service";
+import { addUsage, emptyUsage } from "@/modules/ai/usage";
+import { summarizeBeforeCutoff } from "@/modules/conversations/summary.service";
 import { capturePhoneFromSpeech } from "@/modules/customers/profile.service";
 import { trackEvent } from "@/modules/customers/events.service";
+import { captureUnansweredQuestion } from "@/modules/knowledge/learning.service";
 import { detectShoppingIntent } from "@/modules/sales/intent";
 import { getEngagementState, isOptedOut, setSuggestionOptOut } from "@/modules/sales/state";
 import type { ChatPart } from "@/types/chat";
@@ -29,7 +34,7 @@ export type TurnSend = (event: string, data: unknown) => void;
  * and UI parts), persistence and miss tracking. Shared by the text and voice endpoints, which only
  * differ in how the customer's words arrive and how the reply is delivered.
  *
- * SSE events sent: message.delta {text} · ui.part {part} · ui.cart {cart} · message.event {message}
+ * SSE events sent: message.delta {text} · message.status {tool} · ui.part {part} · ui.cart {cart} · message.event {message}
  * · conversation.mode {mode} · message.completed {messageId} · message.error {message, retryable}
  */
 export async function runConversationTurn(input: {
@@ -40,6 +45,8 @@ export async function runConversationTurn(input: {
   channel: TurnChannel;
   signal: AbortSignal;
   send: TurnSend;
+  /** When the request arrived (Date.now()), so reported latency includes loading, not just the AI. */
+  requestStartedAt?: number;
 }): Promise<void> {
   const { context, conversation, userText, attachments, send } = input;
   const settings = context.store.settings;
@@ -52,6 +59,25 @@ export async function runConversationTurn(input: {
 
   // Reliability record of this turn (written once it ends, whatever the outcome).
   let turnLog: (Omit<Parameters<typeof recordAiTurn>[0], "outcome" | "latencyMs"> & { started: number }) | null = null;
+  const usageTurnId = randomUUID();
+  let turnUsage = emptyUsage();
+  let usageEventCount = 0;
+  let costMicros = 0;
+  let pricedEventCount = 0;
+  let unpricedEventCount = 0;
+  const usageLogFields = () =>
+    usageEventCount === 0
+      ? {}
+      : {
+          usage: turnUsage,
+          costMicros,
+          pricingStatus: (unpricedEventCount === 0
+            ? "priced"
+            : pricedEventCount === 0
+              ? "unpriced"
+              : "mixed") as "priced" | "unpriced" | "mixed",
+          usageEventCount,
+        };
 
   // What the assistant said and showed so far, so a reply the customer talks over is still remembered.
   let partialText = "";
@@ -105,15 +131,27 @@ export async function runConversationTurn(input: {
       return;
     }
 
-    await capturePhoneFromSpeech(context, userText);
-
-    const cart = await getCartSummary(context.sessionId, context.storeId, context.store.currency);
-    const [history, conversationSummary] = await Promise.all([
-      getProviderHistory(conversation.id, 20),
-      summarizeEarlierMessages(conversation.id, 20).catch(() => ""),
-    ]);
+    // Independent loads, at once. A phone number in the message is saved before the AI reads the
+    // customer's saved details (that happens after this).
     const turnStarted = new Date();
+    const measuredFrom = input.requestStartedAt ?? turnStarted.getTime();
+    const [cart, historyRows, summaryCache] = await Promise.all([
+      getCartSummary(context.sessionId, context.storeId, context.store.currency),
+      getProviderHistoryRows(conversation.id, 20),
+      prisma.conversation.findUnique({
+        where: { id: conversation.id },
+        select: {
+          contextSummary: true,
+          contextSummaryCutoff: true,
+          contextSummaryUpdatedAt: true,
+        },
+      }),
+      capturePhoneFromSpeech(context, userText),
+    ]);
+    const { history, cutoff } = buildProviderHistory(historyRows);
+    const conversationSummary = await summarizeBeforeCutoff(conversation.id, cutoff, summaryCache).catch(() => "");
     const intent = detectShoppingIntent({ text: userText, cartItemCount: cart.itemCount });
+    const aiConfig = resolveAiConfig(settings);
     // "Stop suggesting things" / "show me suggestions again": remembered for this visitor.
     if (intent.optOut || intent.wantsSuggestions) {
       const state = await getEngagementState(context.sessionId).catch(() => null);
@@ -126,6 +164,7 @@ export async function runConversationTurn(input: {
       }
     }
     let missed = false;
+    let refused = false;
     let firstTokenMs: number | null = null;
     let toolLog: ToolLogEntry[] = [];
     turnLog = {
@@ -134,10 +173,11 @@ export async function runConversationTurn(input: {
       sessionId: context.sessionId,
       channel: input.channel,
       mode: isLiveAiEnabled(context.store) ? "live" : "demo",
-      model: resolveAiConfig(settings)?.model ?? "",
+      provider: aiConfig?.providerId ?? "",
+      model: aiConfig?.model ?? "",
       userText,
       intent: intent.stage,
-      started: turnStarted.getTime(),
+      started: measuredFrom,
     };
 
     for await (const event of runAssistant({
@@ -152,15 +192,41 @@ export async function runConversationTurn(input: {
     })) {
       if (input.signal.aborted) break;
       if (event.type === "delta") {
-        if (firstTokenMs === null && event.text.trim()) firstTokenMs = Date.now() - turnStarted.getTime();
+        if (firstTokenMs === null && event.text.trim()) firstTokenMs = Date.now() - measuredFrom;
         partialText += event.text;
         send("message.delta", { text: event.text });
+      } else if (event.type === "status") {
+        send("message.status", { tool: event.tool });
       } else if (event.type === "ui") {
         partialParts.push(event.part);
         send("ui.part", { part: event.part });
         if (event.part.type === "cart_summary") send("ui.cart", { cart: event.part.cart });
+      } else if (event.type === "usage") {
+        turnUsage = addUsage(turnUsage, event.usage);
+        usageEventCount += 1;
+        const stored = await recordUsage({
+          eventKey: `${usageTurnId}:${event.round}`,
+          storeId: context.storeId,
+          conversationId: conversation.id,
+          sessionId: context.sessionId,
+          channel: input.channel,
+          source: "chat",
+          mode: isLiveAiEnabled(context.store) ? "live" : "demo",
+          providerId: event.providerId,
+          model: event.model,
+          requestKind: event.requestKind,
+          usage: event.usage,
+          rawUsage: event.rawUsage,
+        });
+        if (stored?.costMicros != null) {
+          costMicros += stored.costMicros;
+          pricedEventCount += 1;
+        } else {
+          unpricedEventCount += 1;
+        }
       } else if (event.type === "done") {
         missed = Boolean(event.missed);
+        refused = Boolean(event.refused);
         toolLog = event.toolLog ?? [];
         persisted = true;
         const stored = await appendMessage({
@@ -179,6 +245,18 @@ export async function runConversationTurn(input: {
     }
 
     await recordTurnOutcome({ ...handoffOptions, missed });
+    const knowledgeSearched = toolLog.some((entry) => entry.name === "search_knowledge");
+    if (missed && !knowledgeSearched && userText.trim()) {
+      await captureUnansweredQuestion({
+        storeId: context.storeId,
+        conversationId: conversation.id,
+        question: userText,
+        channel: input.channel,
+        intent: intent.stage,
+        outcome: "missed",
+        reason: refused ? "assistant_refused" : "assistant_missed",
+      });
+    }
     const handedOff = toolLog.some((entry) => entry.name === "request_human" && entry.ok);
     await recordAiTurn({
       ...turnLog,
@@ -186,6 +264,7 @@ export async function runConversationTurn(input: {
       latencyMs: Date.now() - turnLog.started,
       firstTokenMs,
       toolLog,
+      ...usageLogFields(),
     });
     // The request_human tool or the miss counter may have handed the chat off during this turn.
     await sendModeAndEvents(turnStarted);
@@ -195,7 +274,12 @@ export async function runConversationTurn(input: {
       return;
     }
     if (turnLog) {
-      await recordAiTurn({ ...turnLog, outcome: "error", latencyMs: Date.now() - turnLog.started });
+      await recordAiTurn({
+        ...turnLog,
+        outcome: "error",
+        latencyMs: Date.now() - turnLog.started,
+        ...usageLogFields(),
+      });
     }
     logger.error("widget.message_failed", {
       sessionId: context.sessionId,
@@ -203,6 +287,17 @@ export async function runConversationTurn(input: {
       error: error instanceof Error ? error.message : String(error),
     });
     await recordTurnOutcome({ ...handoffOptions, missed: true }).catch(() => undefined);
+    if (userText.trim()) {
+      await captureUnansweredQuestion({
+        storeId: context.storeId,
+        conversationId: conversation.id,
+        question: userText,
+        channel: input.channel,
+        intent: turnLog?.intent ?? "",
+        outcome: "error",
+        reason: "assistant_error",
+      }).catch(() => undefined);
+    }
     send("message.error", { message: "I could not finish that reply. Please try again.", retryable: true });
   }
 }

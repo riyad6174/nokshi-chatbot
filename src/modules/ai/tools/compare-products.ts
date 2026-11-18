@@ -50,6 +50,7 @@ export const compareProductsTool: ToolDefinition = {
     },
   },
   schema,
+  parallelSafe: true,
   async execute(ctx, args) {
     const input = schema.parse(args);
     const found: ProductCardData[] = [];
@@ -61,7 +62,7 @@ export const compareProductsTool: ToolDefinition = {
     }
     if (found.length < 2) return failure("product_not_found", "Need at least two products of this store to compare. Use the ids or names shown on the cards.");
     const rows = comparisonRows(found);
-    await trackEvent({
+    void trackEvent({
       storeId: ctx.session.storeId,
       sessionId: ctx.session.sessionId,
       visitorId: ctx.session.visitorId,

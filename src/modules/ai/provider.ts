@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logging/logger";
 import type { AiConfig } from "@/modules/ai/config";
+import { normalizeOpenAiUsage, type NormalizedUsage } from "@/modules/ai/usage";
 
 export type ProviderToolCall = {
   id: string;
@@ -37,7 +38,19 @@ export type ProviderTool = {
 
 export type ProviderStreamEvent =
   | { type: "delta"; text: string }
-  | { type: "done"; finishReason: string | null; toolCalls: ProviderToolCall[]; raw?: unknown };
+  | {
+      type: "done";
+      finishReason: string | null;
+      toolCalls: ProviderToolCall[];
+      raw?: unknown;
+      /** Normalized provider usage for this response when the API reports it. */
+      usage?: NormalizedUsage;
+      /** Provider-native usage payload, kept for auditability. */
+      rawUsage?: unknown;
+      providerId?: string;
+      model?: string;
+      providerRequestId?: string;
+    };
 
 export class ProviderError extends Error {
   status?: number;
@@ -57,7 +70,28 @@ export type StreamCompletionInput = {
   temperature?: number;
   /** "none": the model must answer in text (the tools stay defined so earlier tool calls remain valid). */
   toolChoice?: "auto" | "none";
+  /** Upper bound on the reply (and tool arguments) in one round; a guard against runaway output. */
+  maxOutputTokens?: number;
+  /** Groups requests that share the same prompt prefix, for OpenAI's prompt cache. */
+  cacheKey?: string;
 };
+
+/**
+ * OpenAI reasoning models (o1/o3/o4…, gpt-5…) reject `max_tokens` and a custom temperature, and spend
+ * part of their output budget thinking, so they get neither.
+ */
+function isReasoningModel(model: string): boolean {
+  const name = model.split("/").pop()?.toLowerCase() ?? "";
+  return /^(o\d|gpt-5)/.test(name);
+}
+
+function isOpenAiApi(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname === "api.openai.com";
+  } catch {
+    return false;
+  }
+}
 
 function combineSignals(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
@@ -198,6 +232,7 @@ async function fetchWithRetry(url: string, init: RequestInit & { signal: AbortSi
 
 async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGenerator<ProviderStreamEvent> {
   const { config } = input;
+  const reasoning = isReasoningModel(config.model);
   const response = await fetchWithRetry(`${config.baseUrl}/chat/completions`, {
     method: "POST",
     headers: openAiHeaders(config),
@@ -206,7 +241,13 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
       messages: toOpenAiMessages(input.messages),
       tools: input.tools,
       tool_choice: input.toolChoice ?? "auto",
-      temperature: input.temperature ?? 0.2,
+      ...(reasoning ? {} : { temperature: input.temperature ?? 0.2 }),
+      ...(!reasoning && input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
+      // Only OpenAI's own API knows this field; other compatible servers may reject unknown fields.
+      ...(input.cacheKey && isOpenAiApi(config.baseUrl) ? { prompt_cache_key: input.cacheKey } : {}),
+      // Only OpenAI's own API is known to accept this field. Usage from other compatible
+      // providers is recorded when they return it, but the request stays compatible when they don't.
+      ...(isOpenAiApi(config.baseUrl) ? { stream_options: { include_usage: true } } : {}),
       stream: true,
     }),
     signal: combineSignals(input.signal, 45_000),
@@ -218,8 +259,11 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
     throw new ProviderError("The AI provider could not be reached.", response.status);
   }
 
+  const providerRequestId = response.headers.get("x-request-id") ?? undefined;
   const toolCalls = new Map<number, AccumulatedToolCall>();
   let finishReason: string | null = null;
+  let finalUsage: NormalizedUsage | null = null;
+  let finalRawUsage: unknown;
 
   for await (const data of readSse(response)) {
     if (data === "[DONE]") break;
@@ -233,6 +277,14 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
     if (parsed.error) {
       logger.error("ai.provider_stream_error", { message: String(parsed.error?.message || "").slice(0, 300) });
       throw new ProviderError("The AI provider returned an error.");
+    }
+
+    // The usage chunk arrives last and has an empty choices array, so read it before the
+    // choice guard below. Some compatible providers include usage on a normal chunk instead.
+    const usage = normalizeOpenAiUsage(parsed.usage);
+    if (usage) {
+      finalUsage = usage;
+      finalRawUsage = parsed.usage;
     }
 
     const choice = parsed.choices?.[0];
@@ -265,7 +317,16 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
       function: { name: call.name, arguments: call.arguments || "{}" },
     }));
 
-  yield { type: "done", finishReason, toolCalls: completed };
+  yield {
+    type: "done",
+    finishReason,
+    toolCalls: completed,
+    ...(finalUsage ? { usage: finalUsage } : {}),
+    ...(finalRawUsage !== undefined ? { rawUsage: finalRawUsage } : {}),
+    providerId: config.providerId,
+    model: config.model,
+    providerRequestId,
+  };
 }
 
 export async function* streamCompletion(input: StreamCompletionInput): AsyncGenerator<ProviderStreamEvent> {

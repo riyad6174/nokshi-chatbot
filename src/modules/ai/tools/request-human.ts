@@ -19,7 +19,8 @@ const schema = z.object({
 export const requestHumanTool: ToolDefinition = {
   name: "request_human",
   description:
-    "Hand the conversation to a human team member. Use when the customer asks for a person, when they're upset, for complaints, damaged/wrong items, refunds needing approval, or anything you can't answer from the tools. After calling, tell the customer briefly that a team member will reply here; don't keep troubleshooting.",
+    // When to hand off is in the rules (it differs between chat and a voice call), not repeated here.
+    "Hand the conversation to a human team member, when the rules say to. Then tell the customer briefly that a team member will reply here; don't keep troubleshooting.",
   parameters: {
     type: "object",
     additionalProperties: false,

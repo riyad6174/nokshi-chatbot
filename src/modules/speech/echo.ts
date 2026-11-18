@@ -15,6 +15,11 @@ function words(text: string): string[] {
  * True when most words of `heard` appear in what the assistant recently said. Short utterances
  * ("yes", "the black one") never count as echo, so real answers aren't dropped.
  */
+/** Whether a transcript has any words or digits at all (an empty one is usually a cough or a click). */
+export function hasSpeechText(text: string): boolean {
+  return /[\p{L}\p{N}]/u.test(text);
+}
+
 export function isLikelyEcho(heard: string, assistantSaid: string): boolean {
   const heardWords = words(heard);
   if (heardWords.length < MIN_WORDS || !assistantSaid.trim()) return false;

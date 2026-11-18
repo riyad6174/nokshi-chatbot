@@ -45,6 +45,15 @@ describe("AI config resolution", () => {
     expect(remote.config).toBeNull();
   });
 
+  it("uses the dashboard connection as a whole, never mixed with AI_* environment settings", () => {
+    // Saved as "Other OpenAI-compatible API": not overridden by an AI_PROVIDER from the environment.
+    const custom = resolveAiStatus({ ...base, provider: "openai-compatible", model: "my-model", aiBaseUrl: "https://llm.example.com/v1", aiApiKeyEncrypted: encryptSecret("k") });
+    expect(custom.config).toMatchObject({ providerId: "openai-compatible", baseUrl: "https://llm.example.com/v1", model: "my-model" });
+    // Provider chosen without a model: the provider's suggestion, never AI_MODEL meant for another provider.
+    const anthropic = resolveAiStatus({ ...base, model: "", aiApiKeyEncrypted: encryptSecret("sk-ant") });
+    expect(anthropic.config?.model).toBe("claude-opus-5-5");
+  });
+
   it("falls back to the preset base URL for OpenAI-compatible providers", () => {
     const status = resolveAiStatus({ ...base, provider: "groq", model: "m", aiApiKeyEncrypted: encryptSecret("gsk") });
     expect(status.config?.baseUrl).toBe("https://api.groq.com/openai/v1");

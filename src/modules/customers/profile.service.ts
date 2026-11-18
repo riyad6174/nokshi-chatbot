@@ -153,7 +153,11 @@ export type SavedDetails = { name: string; phone: string; address: string; city:
 
 /** The delivery details this visitor gave before, for reuse on the next order. */
 export async function savedDetailsForVisitor(storeId: string, visitorId: string): Promise<SavedDetails | null> {
-  const profile = await findProfileForVisitor(storeId, visitorId);
+  return savedDetailsFromProfile(await findProfileForVisitor(storeId, visitorId));
+}
+
+/** The same, from a profile already loaded (saves a lookup on the reply path). */
+export function savedDetailsFromProfile(profile: CustomerProfile | null): SavedDetails | null {
   if (!profile || (!profile.name && !profile.phone && !profile.address)) return null;
   return {
     name: profile.name,

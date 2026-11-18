@@ -2,7 +2,14 @@ import Link from "next/link";
 import { AdminBanner } from "@/components/dashboard/AdminBanner";
 import { PersonalityForm } from "@/components/dashboard/PersonalityForm";
 import { ProductSourceForm } from "@/components/dashboard/ProductSourceForm";
-import { saveChatFeaturesAction, saveHandoffAction, saveVoiceSalesAction, syncNowAction } from "@/app/admin/chatbot-actions";
+import {
+  restorePromptVersionAction,
+  saveChatFeaturesAction,
+  saveHandoffAction,
+  saveVoiceSalesAction,
+  syncNowAction,
+} from "@/app/admin/chatbot-actions";
+import { listPromptVersions } from "@/modules/ai/prompt-versions.service";
 import { env } from "@/lib/config/env";
 import { speechMode } from "@/modules/speech/config";
 import { requireAdmin } from "@/lib/auth/admin";
@@ -51,9 +58,10 @@ export default async function ConfigureChatbotPage({
     (await prisma.productSource.create({ data: { storeId: store.id } }));
   triggerAutoSyncIfDue(store.id);
 
-  const [productCount, apiCount] = await Promise.all([
+  const [productCount, apiCount, promptVersions] = await Promise.all([
     prisma.product.count({ where: { storeId: store.id, status: "active" } }),
     prisma.product.count({ where: { storeId: store.id, status: "active", sourceType: "api" } }),
+    tab === "personality" ? listPromptVersions(store.id) : Promise.resolve([]),
   ]);
   const counts = parseJsonObject(source.lastCounts) as Record<string, number>;
   const theme = parseJsonObject(settings?.widgetTheme);
@@ -185,6 +193,53 @@ export default async function ConfigureChatbotPage({
               topics,
             }}
           />
+          <div className="mt-6 border-t border-stone-100 pt-4">
+            <h3 className="text-[12px] font-semibold text-stone-900">Business instructions history</h3>
+            <p className="mt-0.5 text-[10.5px] text-stone-500">
+              Every saved change to the business instructions is kept. Core safety and ordering rules are built in and
+              can&apos;t be edited here.
+            </p>
+            {promptVersions.length === 0 ? (
+              <p className="mt-3 text-[11px] text-stone-400">No saved versions yet.</p>
+            ) : (
+              <ul className="mt-3 divide-y divide-stone-100 rounded-lg border border-stone-200">
+                {promptVersions.map((version) => (
+                  <li key={version.id} className="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-medium text-stone-800">
+                        v{version.version}{" "}
+                        <span
+                          className={`ml-1 rounded-full px-1.5 py-px text-[9.5px] ${
+                            version.status === "published" ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"
+                          }`}
+                        >
+                          {version.status === "published" ? "live" : version.status}
+                        </span>
+                        <span className="ml-2 text-[10px] font-normal text-stone-400">
+                          {relativeTime(version.publishedAt ?? version.createdAt)}
+                          {version.createdBy ? ` · ${version.createdBy}` : ""}
+                        </span>
+                      </p>
+                      <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-[10.5px] text-stone-500">
+                        {version.content || "(empty)"}
+                      </p>
+                    </div>
+                    {version.status !== "published" ? (
+                      <form action={restorePromptVersionAction}>
+                        <input type="hidden" name="versionId" value={version.id} />
+                        <button
+                          type="submit"
+                          className="rounded-md border border-stone-300 px-2 py-1 text-[10.5px] font-medium text-stone-700 hover:bg-stone-50"
+                        >
+                          Restore
+                        </button>
+                      </form>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </section>
       ) : null}
 

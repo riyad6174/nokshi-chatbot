@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SpokenSentence, VoiceLang, VoicePhase } from "@/components/chat/useVoiceSession";
+import { hasSpeechText, isLikelyEcho } from "@/modules/speech/echo";
 import type { ChatMessage, ChatPart } from "@/types/chat";
 
 // Live voice over the OpenAI Realtime API (WebRTC). One streaming model hears the customer, decides
@@ -22,6 +23,8 @@ export type RealtimeCallbacks = {
   onReplyPart: (replyId: string, part: ChatPart) => void;
   /** The reply was saved; swap the live message for the stored one (null: nothing to keep). */
   onReplyDone: (replyId: string, message: ChatMessage | null) => void;
+  /** The reply answered the assistant's own echo and was dropped: remove its live message. */
+  onReplyDiscarded?: (replyId: string) => void;
 };
 
 type StartOptions = { lang: VoiceLang; maxSessionMinutes: number };
@@ -84,6 +87,8 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lang, setLangState] = useState<VoiceLang>("bn");
+  /** The tool running right now, so the panel can say "Searching products…" during the pause. */
+  const [activeTool, setActiveTool] = useState<string | null>(null);
 
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
@@ -98,8 +103,18 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
   const speechStartedAtRef = useRef(0);
   const speakingRef = useRef(false);
   const endAfterSpeechRef = useRef(false);
-  /** The reply being spoken: id for the UI, its transcript, and whether it was cut off. */
-  const replyRef = useRef<{ id: string; text: string; interrupted: boolean } | null>(null);
+  /**
+   * The reply being spoken: id for the UI, its transcript, and whether it was cut off. `discard`: it
+   * answers the assistant's own echo and is dropped. `noiseItemId`: the input it answers had an
+   * empty transcript; removed from the call if the reply made no tool call (see onServerEvent).
+   */
+  const replyRef = useRef<{ id: string; text: string; interrupted: boolean; discard?: boolean; noiseItemId?: string } | null>(null);
+  /** What the assistant last said, to recognise its own voice coming back through the mic. */
+  const lastSaidRef = useRef("");
+  /** The customer's newest input item, the one a new reply answers. */
+  const latestUserItemRef = useRef<string | null>(null);
+  /** Input items to remove from the call once the current reply is done. */
+  const pendingDeletesRef = useRef<Set<string>>(new Set());
   /** Customer transcripts still being saved, so a reply is stored after the words it answers. */
   const pendingUserRef = useRef<Promise<unknown>>(Promise.resolve());
   const toolsRunningRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -143,6 +158,11 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
     const reply = replyRef.current;
     replyRef.current = null;
     if (!reply) return;
+    if (reply.discard) {
+      callbacksRef.current.onReplyDiscarded?.(reply.id);
+      return;
+    }
+    if (reply.text.trim()) lastSaidRef.current = reply.text.trim();
     // Store the customer's words first, so the chat and the AI's memory keep the right order.
     await pendingUserRef.current.catch(() => undefined);
     await Promise.all(toolsRunningRef.current.values()).catch(() => undefined);
@@ -162,8 +182,9 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
     async (call: FunctionCallItem) => {
       const replyId = replyRef.current?.id ?? `voice-${Date.now()}`;
       let output: string;
+      setActiveTool(call.name);
       try {
-        const result = await postJson<{ output: string; ui: ChatPart[]; instructions: string | null }>(
+        const result = await postJson<{ output: string; ui: ChatPart[] }>(
           "/api/widget/voice/realtime/tool",
           {
             name: call.name,
@@ -172,11 +193,13 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
           },
         );
         output = result.output;
+        // When the cart or order changed, the output carries the new next step ("orderState"); the
+        // session instructions stay unchanged so the prompt cache holds for the whole call.
         for (const part of result.ui) callbacksRef.current.onReplyPart(replyId, part);
-        // The cart or order changed: refresh the "next step" the model follows.
-        if (result.instructions) send({ type: "session.update", session: { type: "realtime", instructions: result.instructions } });
       } catch (caught) {
         output = JSON.stringify({ ok: false, error: { code: "tool_failed", message: caught instanceof Error ? caught.message : "failed" } });
+      } finally {
+        setActiveTool((current) => (current === call.name ? null : current));
       }
       send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: call.call_id, output } });
     },
@@ -194,11 +217,36 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
           break;
         }
         case "input_audio_buffer.speech_stopped":
+          if (typeof event.item_id === "string") latestUserItemRef.current = event.item_id;
           if (phaseRef.current === "hearing") setPhase("thinking");
           break;
         case "conversation.item.input_audio_transcription.completed": {
           const text = String(event.transcript ?? "").trim();
-          if (!text) break;
+          const itemId = typeof event.item_id === "string" ? event.item_id : null;
+          const reply = replyRef.current;
+          const answersThis = Boolean(itemId && reply && itemId === latestUserItemRef.current);
+          // Nothing transcribed: usually a cough or a click, but short real words ("হ্যাঁ") sometimes
+          // come back empty too, and the model hears the audio itself. So the reply always goes
+          // ahead; only if it made no tool call is the noise removed from the call afterwards, so
+          // it isn't billed again with every later reply.
+          if (!hasSpeechText(text)) {
+            if (answersThis && itemId) reply!.noiseItemId = itemId;
+            break;
+          }
+          // The assistant's own voice through the speakers: not the customer. Drop the reply to it
+          // if it hasn't started playing (once audio plays, most of it is already generated and
+          // billed), and remove the echo from the call. Never mid-tool: tools have side effects.
+          if (isLikelyEcho(text, `${lastSaidRef.current} ${reply?.text ?? ""}`)) {
+            if (answersThis && !speakingRef.current && toolsRunningRef.current.size === 0) {
+              reply!.discard = true;
+              send({ type: "response.cancel" });
+            }
+            if (itemId) {
+              if (replyRef.current) pendingDeletesRef.current.add(itemId);
+              else send({ type: "conversation.item.delete", item_id: itemId });
+            }
+            break;
+          }
           const saving = postJson<{ message: ChatMessage | null }>("/api/widget/voice/realtime/transcript", { role: "user", text })
             .then((saved) => saved.message && callbacksRef.current.onUserMessage(saved.message))
             .catch(() => undefined);
@@ -232,9 +280,38 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
           toListening();
           break;
         case "response.done": {
-          const response = (event.response ?? {}) as { status?: string; output?: Array<{ type: string } & Partial<FunctionCallItem>> };
-          const calls = (response.output ?? []).filter((item): item is FunctionCallItem => item.type === "function_call");
-          if (response.status === "cancelled" && replyRef.current) replyRef.current.interrupted = true;
+          const response = (event.response ?? {}) as {
+            status?: string;
+            id?: string;
+            model?: string;
+            usage?: unknown;
+            output?: Array<{ type: string; id?: string } & Partial<FunctionCallItem>>;
+          };
+          if (response.usage) {
+            const responseId = response.id || `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            void postJson("/api/widget/voice/realtime/usage", {
+              responseId,
+              model: response.model,
+              usage: response.usage,
+            }).catch(() => undefined);
+          }
+          const current = replyRef.current;
+          // A dropped echo reply never runs tools, even one it finished before the cancel landed.
+          const calls = current?.discard
+            ? []
+            : (response.output ?? []).filter((item): item is FunctionCallItem => item.type === "function_call");
+          if (response.status === "cancelled" && current) current.interrupted = true;
+          // Remove what shouldn't stay in the call's context (and be billed again on every reply):
+          // a dropped echo reply and its input, and noise the reply didn't act on.
+          if (current?.discard) {
+            for (const item of response.output ?? []) if (item.id) pendingDeletesRef.current.add(item.id);
+          }
+          if (current?.noiseItemId) {
+            if (calls.length === 0) pendingDeletesRef.current.add(current.noiseItemId);
+            current.noiseItemId = undefined;
+          }
+          for (const itemId of pendingDeletesRef.current) send({ type: "conversation.item.delete", item_id: itemId });
+          pendingDeletesRef.current.clear();
           if (calls.length > 0) {
             // Run the tools, hand back their results, and let the model continue the same reply.
             const running = calls.map((call) => {
@@ -271,6 +348,9 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
     idleTimerRef.current = null;
     sessionTimerRef.current = null;
     dropTimerRef.current = null;
+    lastSaidRef.current = "";
+    latestUserItemRef.current = null;
+    pendingDeletesRef.current.clear();
     if (meterRef.current) {
       cancelAnimationFrame(meterRef.current.frame);
       void meterRef.current.context.close().catch(() => undefined);
@@ -285,6 +365,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
     if (audioRef.current) audioRef.current.srcObject = null;
     speakingRef.current = false;
     setLevel(0);
+    setActiveTool(null);
   }, []);
 
   const stop = useCallback(() => {
@@ -560,6 +641,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
     phase,
     level,
     liveText: "",
+    activeTool,
     error,
     lang,
     active: phase !== "off",

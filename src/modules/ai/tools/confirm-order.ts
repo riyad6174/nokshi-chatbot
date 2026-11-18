@@ -11,7 +11,7 @@ const schema = z.object({ confirmationId: z.string().trim().min(8).max(200).opti
 export const confirmOrderTool: ToolDefinition = {
   name: "confirm_order",
   description:
-    "Place the cash-on-delivery order from the order summary on screen. Call it IMMEDIATELY when the customer's latest message agrees in any way ('yes', 'ok', 'confirm', 'place it', 'হ্যাঁ', 'জি', 'ঠিক আছে', 'কনফার্ম'). Don't ask again and don't re-show the summary first. Not in the same turn as propose_order, and not if they ask for changes.",
+    "Place the cash-on-delivery order from the summary on screen. Call it IMMEDIATELY when their latest message agrees in any way ('yes', 'ok', 'হ্যাঁ', 'ঠিক আছে'); don't ask again or re-show the summary. Not in the same turn as propose_order, nor if they ask for changes.",
   parameters: {
     type: "object",
     additionalProperties: false,
