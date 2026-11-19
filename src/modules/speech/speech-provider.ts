@@ -12,7 +12,15 @@ export type TranscribeInput = {
 };
 
 /** confidence: 0..1 when the provider reports it (Azure); undefined otherwise. */
-export type TranscribeResult = { text: string; lang: SpeechLang; confidence?: number };
+export type TranscribeResult = {
+  text: string;
+  lang: SpeechLang;
+  confidence?: number;
+  /** Raw token usage when the provider reports it (OpenAI gpt-4o-*-transcribe), for the usage ledger. */
+  usage?: unknown;
+  /** Model that transcribed, for pricing. */
+  model?: string;
+};
 
 export type SynthesizeInput = { text: string; lang: SpeechLang; signal?: AbortSignal };
 

@@ -8,7 +8,7 @@ import { priceLabel } from "@/lib/money";
 import { RECOMMENDATION_KINDS, recommend, type RecommendationKind } from "@/modules/catalog/recommendation.service";
 import { formatMap, formatRecipes, formatRelationships } from "@/modules/sales/admin-format";
 import { ENGAGEMENT_TRIGGERS, INDUSTRIES, INDUSTRY_LABELS, STRATEGIES, resolveSalesConfig } from "@/modules/sales/config";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +54,7 @@ export default async function SalesEngagementPage({
 }) {
   await requireAdmin();
   const params = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store?.settings) return <AdminBanner error="No store configured. Run npm run db:seed." />;
   const config = resolveSalesConfig(store.settings);
   const products = await prisma.product.findMany({

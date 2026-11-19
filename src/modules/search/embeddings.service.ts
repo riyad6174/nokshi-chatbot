@@ -1,7 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { logger } from "@/lib/logging/logger";
+import { recordUsage } from "@/modules/analytics/usage.service";
+import { normalizeEmbeddingUsage } from "@/modules/ai/usage";
 
 // Optional semantic search. Product and knowledge texts are embedded with any OpenAI-compatible
 // /embeddings endpoint and the vectors are stored on the documents themselves (no new database).
@@ -70,7 +72,10 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return na === 0 || nb === 0 ? 0 : dot / Math.sqrt(na * nb);
 }
 
-export async function embedTexts(texts: string[], config = embeddingsConfig()): Promise<number[][]> {
+/** Who to bill an embeddings call to in the usage ledger. */
+type EmbeddingUsageMeta = { storeId: string; purpose: "query" | "products" | "knowledge" };
+
+export async function embedTexts(texts: string[], config = embeddingsConfig(), meta?: EmbeddingUsageMeta): Promise<number[][]> {
   if (!config || texts.length === 0) return [];
   for (let attempt = 0; ; attempt += 1) {
     const response = await fetch(`${config.EMBEDDINGS_BASE_URL}/embeddings`, {
@@ -84,7 +89,8 @@ export async function embedTexts(texts: string[], config = embeddingsConfig()): 
       signal: AbortSignal.timeout(15_000),
     });
     if (response.ok) {
-      const body = (await response.json()) as { data?: Array<{ embedding?: number[]; index?: number }> };
+      const body = (await response.json()) as { data?: Array<{ embedding?: number[]; index?: number }>; usage?: unknown };
+      if (meta) recordEmbeddingUsage(meta, config.EMBEDDINGS_MODEL, body.usage);
       const rows = [...(body.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
       return rows.map((row) => (Array.isArray(row.embedding) ? row.embedding.map(Number) : []));
     }
@@ -95,14 +101,31 @@ export async function embedTexts(texts: string[], config = embeddingsConfig()): 
   }
 }
 
+function recordEmbeddingUsage(meta: EmbeddingUsageMeta, model: string, raw: unknown) {
+  const usage = normalizeEmbeddingUsage(raw);
+  if (!usage) return;
+  void recordUsage({
+    eventKey: `embedding:${meta.storeId}:${meta.purpose}:${randomUUID()}`,
+    storeId: meta.storeId,
+    channel: "text",
+    source: "embedding",
+    mode: "live",
+    providerId: "embeddings",
+    model,
+    requestKind: "embedding",
+    usage,
+    rawUsage: raw,
+  }).catch(() => undefined);
+}
+
 // Recent query vectors, so the same search (or a retry) doesn't pay twice.
 const queryCache = new Map<string, number[]>();
 
-async function embedQuery(query: string, config: EmbeddingsConfig): Promise<number[] | null> {
+async function embedQuery(query: string, config: EmbeddingsConfig, storeId: string): Promise<number[] | null> {
   const key = `${config.EMBEDDINGS_MODEL}|${query.trim().toLowerCase()}`;
   const cached = queryCache.get(key);
   if (cached) return cached;
-  const [vector] = await embedTexts([query], config);
+  const [vector] = await embedTexts([query], config, { storeId, purpose: "query" });
   if (!vector?.length) return null;
   queryCache.set(key, vector);
   if (queryCache.size > 300) queryCache.delete(queryCache.keys().next().value!);
@@ -146,7 +169,7 @@ export async function refreshProductEmbeddings(storeId: string, limit = 500): Pr
     .slice(0, limit);
   for (let start = 0; start < stale.length; start += 64) {
     const batch = stale.slice(start, start + 64);
-    const vectors = await embedTexts(batch.map((entry) => entry.text), config);
+    const vectors = await embedTexts(batch.map((entry) => entry.text), config, { storeId, purpose: "products" });
     await Promise.all(
       batch.map((entry, index) =>
         vectors[index]?.length
@@ -168,7 +191,7 @@ export async function refreshKnowledgeEmbeddings(storeId: string): Promise<numbe
     .filter((entry) => entry.doc.embeddingHash !== entry.hash || entry.doc.embedding.length === 0);
   for (let start = 0; start < stale.length; start += 32) {
     const batch = stale.slice(start, start + 32);
-    const vectors = await embedTexts(batch.map((entry) => entry.text), config);
+    const vectors = await embedTexts(batch.map((entry) => entry.text), config, { storeId, purpose: "knowledge" });
     await Promise.all(
       batch.map((entry, index) =>
         vectors[index]?.length
@@ -210,7 +233,7 @@ async function atlasVectorSearch(collection: string, index: string, vector: numb
 export async function semanticProductMatches(storeId: string, query: string, limit = 8): Promise<Scored> {
   const config = embeddingsConfig();
   if (!config || !query.trim()) return [];
-  const vector = await embedQuery(query, config);
+  const vector = await embedQuery(query, config, storeId);
   if (!vector) return [];
   let scored: Scored;
   if (config.VECTOR_SEARCH === "atlas") {
@@ -229,7 +252,7 @@ export async function semanticProductMatches(storeId: string, query: string, lim
 export async function semanticKnowledgeMatches(storeId: string, query: string, limit = 5): Promise<Map<string, number>> {
   const config = embeddingsConfig();
   if (!config || !query.trim()) return new Map();
-  const vector = await embedQuery(query, config);
+  const vector = await embedQuery(query, config, storeId);
   if (!vector) return new Map();
   let scored: Scored;
   if (config.VECTOR_SEARCH === "atlas") {

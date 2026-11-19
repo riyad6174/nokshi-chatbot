@@ -3,11 +3,12 @@ import { prisma } from "@/lib/db/prisma";
 import { isObjectId } from "@/lib/db/ids";
 import { logger } from "@/lib/logging/logger";
 import { resolveUsageCost } from "@/modules/ai/pricing.service";
-import { audioTokensFromOpenAiUsage, makeUsage, type NormalizedUsage } from "@/modules/ai/usage";
+import { audioTokensFromOpenAiUsage, makeUsage, normalizeOpenAiUsage, type NormalizedUsage } from "@/modules/ai/usage";
+import { randomUUID } from "node:crypto";
 
 export type UsageChannel = "text" | "voice";
-export type UsageSource = "chat" | "realtime" | "embedding" | "other";
-export type UsageRequestKind = "chat_round" | "realtime_response" | "embedding" | "other";
+export type UsageSource = "chat" | "realtime" | "embedding" | "transcription" | "other";
+export type UsageRequestKind = "chat_round" | "realtime_response" | "embedding" | "transcription" | "other";
 
 export const USAGE_PERIODS = [7, 30, 90] as const;
 export type UsagePeriod = (typeof USAGE_PERIODS)[number];
@@ -322,7 +323,19 @@ export async function storeUsage(storeId: string, periodDays: number, now = new 
   const byChannel = byKey(rows, (row) => ({ key: row.channel, label: row.channel }));
   const bySource = byKey(rows, (row) => ({ key: row.source, label: row.source }));
 
+  // Text and cascade-voice turns that reached the model: how many requests and prompt tokens each
+  // customer message costs. These are the numbers the token-saving work moves.
+  const chatRounds = rows.filter((row) => row.requestKind === "chat_round");
+  const liveTurns = await prisma.aiTurnLog.count({ where: { storeId, at: { gte: since }, mode: "live" } });
+  const promptTokens = chatRounds.reduce((sum, row) => sum + row.inputTokens + row.cachedInputTokens + row.cacheWriteInputTokens, 0);
+  const perTurn = {
+    turns: liveTurns,
+    callsPerTurn: liveTurns > 0 ? chatRounds.length / liveTurns : null,
+    promptTokensPerTurn: liveTurns > 0 ? Math.round(promptTokens / liveTurns) : null,
+  };
+
   return {
+    perTurn,
     periodDays,
     since: since.toISOString(),
     totals,
@@ -446,4 +459,36 @@ export async function rebuildConversationUsage(storeId: string, conversationId: 
       lastEventAt: events[events.length - 1]?.at ?? null,
     },
   });
+}
+
+/**
+ * Speech-to-text usage (cascade voice, or the input transcription of a Realtime call). Fire and
+ * forget: a ledger write must never slow down or fail the customer's turn.
+ */
+export function recordTranscriptionUsage(input: {
+  storeId: string;
+  conversationId?: string | null;
+  sessionId?: string | null;
+  providerId: string;
+  model: string;
+  raw: unknown;
+  /** Stable id (e.g. the Realtime item id) so a retried report isn't counted twice. */
+  key?: string;
+}): void {
+  const usage = normalizeOpenAiUsage(input.raw);
+  if (!usage) return;
+  void recordUsage({
+    eventKey: `transcription:${input.storeId}:${input.key ?? randomUUID()}`,
+    storeId: input.storeId,
+    conversationId: input.conversationId,
+    sessionId: input.sessionId,
+    channel: "voice",
+    source: "transcription",
+    mode: "live",
+    providerId: input.providerId,
+    model: input.model,
+    requestKind: "transcription",
+    usage,
+    rawUsage: input.raw,
+  }).catch(() => undefined);
 }

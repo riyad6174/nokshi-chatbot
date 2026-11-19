@@ -3,7 +3,7 @@ import { AdminBanner } from "@/components/dashboard/AdminBanner";
 import { requireAdmin } from "@/lib/auth/admin";
 import { formatMinor } from "@/lib/money";
 import { PERIODS, storeAnalytics } from "@/modules/analytics/analytics.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +60,7 @@ function RankTable({ title, rows, empty, valueLabel = "Count" }: { title: string
 export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<{ days?: string }> }) {
   await requireAdmin();
   const { days: rawDays } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
   const days = PERIODS.find((period) => String(period) === rawDays) ?? 30;
   const data = await storeAnalytics(store.id, days);

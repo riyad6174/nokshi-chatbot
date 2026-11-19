@@ -15,7 +15,7 @@ import { getConversationDetail, toChatMessage } from "@/modules/conversations/co
 import { markRead } from "@/modules/conversations/handoff.service";
 import { conversationDigest } from "@/modules/conversations/summary.service";
 import { STATUS_LABELS } from "@/modules/orders/order.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 import type { ChatMessage, ChatPart } from "@/types/chat";
 
 export const dynamic = "force-dynamic";
@@ -118,7 +118,7 @@ export default async function InboxConversationPage({
   const admin = await requireAdmin();
   const { id } = await params;
   const { error } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) notFound();
   const conversation = await getConversationDetail(store.id, id);
   if (!conversation) notFound();

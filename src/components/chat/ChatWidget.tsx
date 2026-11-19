@@ -1358,9 +1358,6 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         accent={accent}
         position={position}
         onSpeakingChange={setWelcomeSpeaking}
-        onVisibleChange={(visible) => {
-          if (visible) warmUpVoice();
-        }}
         onTalk={() => void startVoiceAssistant()}
         onChat={() => {
           setView("chat");

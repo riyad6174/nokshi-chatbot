@@ -362,11 +362,12 @@ export async function findOrdersForCustomer(input: {
   return { orders, verified: true };
 }
 
-export async function listOrdersForAdmin(storeId: string, status?: string, take = 100) {
+export async function listOrdersForAdmin(storeId: string, status?: string, take = 100, skip = 0) {
   return prisma.order.findMany({
     where: { storeId, ...(status && status !== "all" ? { status } : {}) },
     orderBy: { createdAt: "desc" },
     take,
+    skip,
   });
 }
 

@@ -8,8 +8,6 @@ import type { CartPayload } from "@/types/chat";
 // configuration, so it stays in the cached (stable) part of the system prompt; `buildSalesTurnContext`
 // changes every turn and goes in the per-turn part.
 
-const KIND_HELP = `get_recommendations kinds: 'complete_the_look' (outfit/room pieces that go with an item), 'compatible' (accessories that fit a device), 'recipe' (other ingredients for a dish; pass need = the dish), 'bundle' (a complete set for a need), 'complementary' (add-ons), 'similar' (alternatives/substitutes), 'cheaper' (budget alternatives), 'personalized' (based on their interests).`;
-
 export function buildSalesPlaybook(config: SalesConfig, currency: string): string {
   if (!config.enabled) return "";
   const lines: string[] = [];
@@ -18,7 +16,9 @@ export function buildSalesPlaybook(config: SalesConfig, currency: string): strin
   if (config.persona.personality) lines.push(`- Personality: ${config.persona.personality}`);
   lines.push(
     `- Think like a good salesperson: understand what they're trying to do, ask one useful question when it changes the answer (never one you already asked or they already answered), recommend, explain why, help them decide, then guide them to the order.`,
-    `- Recommend at most ${config.recommendation.maxPerReply} products at a time. ${KIND_HELP}`,
+    // The get_recommendations kinds are explained in the tool's own description; repeating them here
+    // only cost tokens on every request.
+    `- Recommend at most ${config.recommendation.maxPerReply} products at a time.`,
     config.recommendation.explainReasons
       ? "- Each suggestion comes with a `reason` from the catalog: say it in your own short words (e.g. \"beige goes well with white\"). Never add reasons, specs, discounts or compatibility the tool didn't give."
       : "- Keep suggestions short; don't explain unless asked.",

@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { formatMinor } from "@/lib/money";
 import { getCustomerForAdmin } from "@/modules/customers/admin.service";
 import { STATUS_LABELS } from "@/modules/orders/order.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +22,7 @@ const EVENT_LABELS: Record<string, string> = {
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireAdmin();
   const { id } = await params;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) notFound();
   const detail = await getCustomerForAdmin(store.id, id);
   if (!detail) notFound();

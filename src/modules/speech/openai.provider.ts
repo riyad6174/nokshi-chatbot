@@ -36,9 +36,9 @@ export function createOpenAiSpeechProvider(config: {
       form.append("response_format", "json");
       const response = await fetch(`${config.baseUrl}/audio/transcriptions`, { method: "POST", headers: auth, body: form, signal });
       if (!response.ok) throw new SpeechError("Speech recognition failed.", response.status);
-      const body = (await response.json().catch(() => null)) as { text?: string } | null;
+      const body = (await response.json().catch(() => null)) as { text?: string; usage?: unknown } | null;
       const text = cleanTranscript(body?.text?.trim() ?? "", lang);
-      return { text, lang: detectLang(text, lang) };
+      return { text, lang: detectLang(text, lang), usage: body?.usage, model: config.sttModel };
     },
     async synthesize({ text, lang, signal }) {
       const response = await fetch(`${config.baseUrl}/audio/speech`, {

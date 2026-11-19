@@ -6,7 +6,7 @@ import { decryptSecret } from "@/lib/crypto/secrets";
 import { resolveAiStatus } from "@/modules/ai/config";
 import { EFFORT_LEVELS, PROVIDER_PRESETS, getPreset } from "@/modules/ai/presets";
 import { realtimeApiKey, realtimeSettings } from "@/modules/realtime/realtime.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export default async function AdminAiPage({
 }) {
   await requireAdmin();
   const { saved, error } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   const status = resolveAiStatus(store.settings);

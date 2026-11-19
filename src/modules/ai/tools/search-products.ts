@@ -6,6 +6,7 @@ import { trackEvent } from "@/modules/customers/events.service";
 import { semanticProductMatches, semanticSearchEnabled } from "@/modules/search/embeddings.service";
 import { logger } from "@/lib/logging/logger";
 import { productCompact, success } from "@/modules/ai/tools/helpers";
+import { priceLabel } from "@/lib/money";
 import type { ToolDefinition } from "@/modules/ai/tools/types";
 import type { ChatPart, ProductCardData } from "@/types/chat";
 
@@ -108,7 +109,14 @@ export const searchProductsTool: ToolDefinition = {
         {
           matched: selection.length > 0,
           count: selection.length,
-          products: selection.map((product) => productCompact(product, { brief: true })),
+          // Name, price and stock only: the cards show the rest, and the next turn's history lists
+          // the ids and versions of what's on screen. 24 full products cost ~3k tokens per round.
+          products: selection.map((product) => ({
+            id: product.id,
+            name: product.name,
+            price: priceLabel(product.priceMinor, product.currency),
+            available: product.available,
+          })),
           storeCategories: categories,
           note:
             selection.length > 0

@@ -80,14 +80,28 @@ function shortenDescription(description: string): string {
   return `${(sentence > 180 ? cut.slice(0, sentence + 1) : cut.slice(0, 417)).trim()}…`;
 }
 
-export function getProviderTools(enabledFeatures?: string | string[] | null): ProviderTool[] {
+/** Tools that only make sense with something in the cart. */
+const CART_ONLY_TOOLS = new Set(["get_cart", "update_cart_item", "remove_cart_item", "prepare_checkout", "go_to_checkout"]);
+
+/**
+ * What the turn starts with. Tool schemas are re-sent on every model round, so tools that can't
+ * succeed in this state are left out. The sets are few and fixed (empty cart / cart / order on
+ * screen), so each one still gets reused from the provider's prompt cache.
+ * propose_order stays with an empty cart: "add it and order" adds and proposes in one turn.
+ */
+export type ToolState = { cartItemCount: number; openOrder: boolean };
+
+export function getProviderTools(enabledFeatures?: string | string[] | null, state?: ToolState): ProviderTool[] {
   const enabled = enabledToolFeatures(enabledFeatures);
-  const allowed = enabled
-    ? tools.filter((tool) => {
-        const feature = TOOL_FEATURES[tool.name];
-        return !feature || enabled.has(feature);
-      })
-    : tools;
+  const allowed = tools.filter((tool) => {
+    const feature = TOOL_FEATURES[tool.name];
+    if (enabled && feature && !enabled.has(feature)) return false;
+    if (state) {
+      if (tool.name === "confirm_order" && !state.openOrder) return false;
+      if (CART_ONLY_TOOLS.has(tool.name) && state.cartItemCount === 0 && !state.openOrder) return false;
+    }
+    return true;
+  });
   return allowed.map((tool) => ({
     type: "function",
     function: {

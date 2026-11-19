@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AdminBanner } from "@/components/dashboard/AdminBanner";
 import { formatMinor } from "@/lib/money";
 import { listProductsForAdmin } from "@/modules/catalog/product.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ export default async function AdminProductsPage({
   searchParams: Promise<{ saved?: string; error?: string }>;
 }) {
   const { saved, error } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
 
   if (!store) {
     return <AdminBanner error="No store configured. Run npm run db:seed." />;

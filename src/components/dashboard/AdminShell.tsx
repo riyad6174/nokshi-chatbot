@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import {
   LuBell,
   LuChevronRight,
@@ -17,6 +17,7 @@ import {
 } from "react-icons/lu";
 import { logoutAction } from "@/app/admin/auth-actions";
 import { AdminNav } from "@/components/dashboard/AdminNav";
+import { NavProgress } from "@/components/dashboard/NavProgress";
 import { ADMIN_NAV, findNavLocation, isNavLinkActive } from "@/components/dashboard/admin-nav-config";
 
 const RAIL_KEY = "admin.sidebar.rail";
@@ -157,6 +158,9 @@ export function AdminShell({
   return (
     <div className="admin-ui relative min-h-screen">
       <Backdrop />
+      <Suspense fallback={null}>
+        <NavProgress />
+      </Suspense>
 
       {/* Desktop sidebar */}
       <aside

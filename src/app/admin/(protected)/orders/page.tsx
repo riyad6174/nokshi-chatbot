@@ -1,27 +1,39 @@
 import Link from "next/link";
 import { AdminBanner } from "@/components/dashboard/AdminBanner";
+import { AdminPagination, paginate } from "@/components/dashboard/AdminPagination";
 import { OrderStatusBadge } from "@/components/dashboard/OrderStatusBadge";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db/prisma";
 import { formatMinor } from "@/lib/money";
 import { ORDER_STATUSES, STATUS_LABELS, listOrdersForAdmin } from "@/modules/orders/order.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+const PAGE_SIZE = 20;
+
+function ordersHref(filter: string, page = 1): string {
+  const params = new URLSearchParams();
+  if (filter !== "all") params.set("status", filter);
+  if (page > 1) params.set("page", String(page));
+  const query = params.toString();
+  return `/admin/orders${query ? `?${query}` : ""}`;
+}
+
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string; page?: string }> }) {
   await requireAdmin();
-  const { status } = await searchParams;
-  const store = await getPrimaryStore();
+  const { status, page: rawPage } = await searchParams;
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   const filter = status && (ORDER_STATUSES as readonly string[]).includes(status) ? status : "all";
-  const [orders, grouped] = await Promise.all([
-    listOrdersForAdmin(store.id, filter),
-    prisma.order.groupBy({ by: ["status"], where: { storeId: store.id }, _count: { _all: true } }),
-  ]);
+  // The counts give the page count, so they load first; then only one page of orders is read.
+  const grouped = await prisma.order.groupBy({ by: ["status"], where: { storeId: store.id }, _count: { _all: true } });
   const countFor = (key: string) => grouped.find((group) => group.status === key)?._count._all ?? 0;
   const total = grouped.reduce((sum, group) => sum + group._count._all, 0);
+  const filtered = filter === "all" ? total : countFor(filter);
+  const pages = paginate(rawPage, filtered, PAGE_SIZE);
+  const orders = await listOrdersForAdmin(store.id, filter, PAGE_SIZE, pages.skip);
 
   return (
     <div>
@@ -37,7 +49,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           return (
             <Link
               key={key}
-              href={key === "all" ? "/admin/orders" : `/admin/orders?status=${key}`}
+              href={ordersHref(key)}
               aria-current={active ? "page" : undefined}
               className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
                 active ? "bg-stone-900 text-white" : "bg-white text-stone-600 ring-1 ring-stone-200 hover:ring-stone-300"
@@ -91,6 +103,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           </table>
         )}
       </div>
+
+      <AdminPagination label="Order pages" total={filtered} hrefFor={(page) => ordersHref(filter, page)} {...pages} />
     </div>
   );
 }

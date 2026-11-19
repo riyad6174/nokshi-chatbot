@@ -5,7 +5,7 @@ import { createKnowledgeAction } from "@/app/admin/actions";
 import { requireAdmin } from "@/lib/auth/admin";
 import { isObjectId } from "@/lib/db/ids";
 import { prisma } from "@/lib/db/prisma";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export default async function NewKnowledgePage({
 }) {
   await requireAdmin();
   const { error, questionId } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   const question =

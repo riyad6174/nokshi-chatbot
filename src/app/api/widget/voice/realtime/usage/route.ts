@@ -3,9 +3,9 @@ import { z } from "zod";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
-import { recordUsage } from "@/modules/analytics/usage.service";
+import { recordTranscriptionUsage, recordUsage } from "@/modules/analytics/usage.service";
 import { getSessionContext } from "@/modules/conversations/session.service";
-import { realtimeSettings } from "@/modules/realtime/realtime.service";
+import { REALTIME_TRANSCRIBE_MODEL, realtimeSettings } from "@/modules/realtime/realtime.service";
 import { normalizeRealtimeUsage } from "@/modules/ai/usage";
 
 export const runtime = "nodejs";
@@ -15,6 +15,8 @@ const bodySchema = z.object({
   responseId: z.string().trim().min(1).max(200),
   model: z.string().trim().max(150).optional(),
   usage: z.record(z.unknown()),
+  /** "transcription": the input transcription of one customer utterance (responseId = item id). */
+  kind: z.enum(["response", "transcription"]).default("response"),
 });
 
 /**
@@ -33,6 +35,19 @@ export async function POST(request: NextRequest) {
 
   const context = await getSessionContext(sessionId);
   if (!context) return jsonError(401, "session_expired", "Your chat session expired. Please reload the chat.");
+
+  if (parsed.data.kind === "transcription") {
+    recordTranscriptionUsage({
+      storeId: context.storeId,
+      conversationId: context.conversationId,
+      sessionId: context.sessionId,
+      providerId: "openai",
+      model: REALTIME_TRANSCRIBE_MODEL,
+      raw: parsed.data.usage,
+      key: parsed.data.responseId,
+    });
+    return jsonOk({ recorded: true });
+  }
 
   const usage = normalizeRealtimeUsage(parsed.data.usage);
   if (!usage) return jsonOk({ recorded: false });

@@ -16,7 +16,8 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db/prisma";
 import { CONVERSATION_STYLES, TONES } from "@/modules/ai/system-instructions";
 import { MAPPING_FIELDS, parseMapping, triggerAutoSyncIfDue } from "@/modules/catalog/product-sync.service";
-import { getPrimaryStore, parseJsonArray, parseJsonObject } from "@/modules/stores/store.service";
+import { parseJsonArray, parseJsonObject } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ export default async function ConfigureChatbotPage({
   await requireAdmin();
   const { tab: rawTab, saved, error } = await searchParams;
   const tab = TABS.some((entry) => entry.id === rawTab) ? rawTab! : "products";
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   const settings = store.settings;

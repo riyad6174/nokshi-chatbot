@@ -5,7 +5,8 @@ import { requireAdmin } from "@/lib/auth/admin";
 import Link from "next/link";
 import { env } from "@/lib/config/env";
 import { resolveAiStatus } from "@/modules/ai/config";
-import { getPrimaryStore, parseJsonArray } from "@/modules/stores/store.service";
+import { parseJsonArray } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function AdminSettingsPage({
 }) {
   await requireAdmin();
   const { saved, error } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   const settings = store.settings;

@@ -125,7 +125,12 @@ export async function* streamAnthropic(input: {
   const stream = client.beta.messages.stream(
     {
       model: input.config.model,
-      max_tokens: 64000,
+      // Includes thinking tokens, so it stays well above a chat reply; it only stops a runaway turn.
+      // Spend is controlled by effort (Admin → AI model), not by this cap.
+      max_tokens: 8000,
+      // Automatic caching of the newest message as well, so tool rounds 2+ of a turn read the
+      // history from cache instead of paying for it again (tools + stable system are cached too).
+      cache_control: { type: "ephemeral" },
       ...(system.length > 0 ? { system } : {}),
       messages,
       tools: toAnthropicTools(input.tools),

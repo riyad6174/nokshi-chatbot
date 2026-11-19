@@ -8,7 +8,7 @@ import {
   listCustomersForAdmin,
   type CustomerFilter,
 } from "@/modules/customers/admin.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +22,7 @@ const FILTER_LABELS: Record<CustomerFilter, string> = {
 export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ filter?: string; q?: string }> }) {
   await requireAdmin();
   const { filter: rawFilter, q = "" } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   const filter = (CUSTOMER_FILTERS as readonly string[]).includes(rawFilter ?? "") ? (rawFilter as CustomerFilter) : "all";

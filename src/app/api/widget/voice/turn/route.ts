@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { logger } from "@/lib/logging/logger";
+import { recordTranscriptionUsage } from "@/modules/analytics/usage.service";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { jsonError, jsonOk, sseEvent, sseHeaders, validationError } from "@/lib/http";
 import { readWidgetSessionId } from "@/lib/auth/widget";
@@ -89,6 +90,14 @@ export async function POST(request: NextRequest) {
       });
       userText = result.text || userText;
       confidence = result.confidence;
+      recordTranscriptionUsage({
+        storeId: context.storeId,
+        conversationId: conversation.id,
+        sessionId: context.sessionId,
+        providerId: provider.id,
+        model: result.model ?? provider.id,
+        raw: result.usage,
+      });
     } catch (error) {
       logger.warn("voice.stt_failed", { error: error instanceof Error ? error.message : String(error) });
       if (!userText) return jsonError(502, "speech_unavailable", "I couldn't hear that clearly. Please try again.");

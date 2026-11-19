@@ -6,6 +6,7 @@ import { newSession, resetDb, seedFixture, type Fixture } from "../helpers/fixtu
 const turns: Array<(input: StreamCompletionInput) => ProviderStreamEvent[]> = [];
 const calls: ProviderMessage[][] = [];
 const toolChoices: Array<StreamCompletionInput["toolChoice"]> = [];
+const toolNamesPerCall: string[][] = [];
 
 vi.mock("@/modules/ai/provider", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/modules/ai/provider")>();
@@ -14,6 +15,7 @@ vi.mock("@/modules/ai/provider", async (importOriginal) => {
     async *streamCompletion(input: StreamCompletionInput) {
       calls.push(structuredClone(input.messages));
       toolChoices.push(input.toolChoice);
+      toolNamesPerCall.push(input.tools.map((tool) => tool.function.name));
       const next = turns.shift() ?? (() => [{ type: "done", finishReason: "stop", toolCalls: [] }]);
       for (const event of next(input)) yield event;
     },
@@ -29,6 +31,7 @@ beforeEach(async () => {
   turns.length = 0;
   calls.length = 0;
   toolChoices.length = 0;
+  toolNamesPerCall.length = 0;
   await resetDb();
   fx = await seedFixture();
 });
@@ -84,22 +87,22 @@ describe("live assistant tool loop", () => {
     for (let i = 0; i < 20; i += 1) turns.push(() => [toolCall("get_cart", {}, `call_${i}`)]);
 
     const events = await collect(session, "loop");
-    // Three tool rounds, then one round with tools disabled; the model kept calling tools anyway.
-    expect(calls).toHaveLength(4);
-    expect(toolChoices).toEqual(["auto", "auto", "auto", "none"]);
+    // Two tool rounds, then one round with tools disabled; the model kept calling tools anyway.
+    expect(calls).toHaveLength(3);
+    expect(toolChoices).toEqual(["auto", "auto", "none"]);
     expect(events.at(-1)).toMatchObject({ type: "done", content: "Fallback from A", missed: true });
   });
 
   it("gives the model a final round without tools so a long tool chain still ends in a reply", async () => {
     const session = await newSession();
-    for (let i = 0; i < 3; i += 1) turns.push(() => [toolCall("get_cart", {}, `call_${i}`)]);
+    for (let i = 0; i < 2; i += 1) turns.push(() => [toolCall("get_cart", {}, `call_${i}`)]);
     turns.push(() => say("Your cart is empty."));
 
     const events = await collect(session, "what's in my cart?");
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(3);
     expect(toolChoices.at(-1)).toBe("none");
     // The final round sees every tool result from the earlier rounds.
-    expect(calls.at(-1)!.filter((m) => m.role === "tool")).toHaveLength(3);
+    expect(calls.at(-1)!.filter((m) => m.role === "tool")).toHaveLength(2);
     expect(events.at(-1)).toMatchObject({ type: "done", content: "Your cart is empty.", missed: false });
   });
 
@@ -116,6 +119,16 @@ describe("live assistant tool loop", () => {
     expect(stable!.content).not.toContain("CURRENT CART");
     expect(stable!.content).not.toContain("LANGUAGE HINT");
     expect(perTurn!.content).toContain(`LANGUAGE HINT: ${session.locale}`);
+  });
+
+  it("sends the same cacheable block to every customer of the store, so the prompt cache is shared", async () => {
+    turns.push(() => say("Hi!"));
+    await collect(await newSession(), "hello");
+    turns.push(() => say("Hello again!"));
+    await collect(await newSession(), "what do you sell?");
+    expect(calls[0]![0]!.content).toBe(calls[1]![0]!.content);
+    // And the cacheable tool list only differs by state (empty cart here, so the same).
+    expect(toolNamesPerCall[0]).toEqual(toolNamesPerCall[1]);
   });
 
   it("runs lookups of one round together and hands the results back in call order", async () => {

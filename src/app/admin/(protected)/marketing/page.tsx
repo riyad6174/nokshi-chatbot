@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db/prisma";
 import { MARKETING_CHANNELS, type MarketingChannel } from "@/modules/marketing/consent";
 import { parseSegment, previewSegment } from "@/modules/marketing/segments";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,7 @@ function describeSegment(value: string): string {
 export default async function MarketingPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string }> }) {
   await requireAdmin();
   const params = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   const [campaigns, recent, consenting, unsubscribed] = await Promise.all([

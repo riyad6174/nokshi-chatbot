@@ -6,7 +6,7 @@ import { updateOrderStatusAction } from "@/app/admin/order-actions";
 import { requireAdmin } from "@/lib/auth/admin";
 import { formatMinor } from "@/lib/money";
 import { STATUS_LABELS, allowedNextStatuses, getOrderForAdmin } from "@/modules/orders/order.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +24,7 @@ export default async function OrderDetailPage({
   await requireAdmin();
   const { id } = await params;
   const { saved, error } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) notFound();
   const order = await getOrderForAdmin(store.id, id);
   if (!order) notFound();

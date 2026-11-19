@@ -223,6 +223,14 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
         case "conversation.item.input_audio_transcription.completed": {
           const text = String(event.transcript ?? "").trim();
           const itemId = typeof event.item_id === "string" ? event.item_id : null;
+          // Transcription is billed on its own; report it like response usage (keyed by item id).
+          if (event.usage && typeof event.usage === "object") {
+            void postJson("/api/widget/voice/realtime/usage", {
+              kind: "transcription",
+              responseId: itemId ?? `transcription-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              usage: event.usage,
+            }).catch(() => undefined);
+          }
           const reply = replyRef.current;
           const answersThis = Boolean(itemId && reply && itemId === latestUserItemRef.current);
           // Nothing transcribed: usually a cough or a click, but short real words ("হ্যাঁ") sometimes

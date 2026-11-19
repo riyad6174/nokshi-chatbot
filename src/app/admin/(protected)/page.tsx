@@ -28,7 +28,8 @@ import { resolveAiStatus } from "@/modules/ai/config";
 import { storeUsage } from "@/modules/analytics/usage.service";
 import { allowedCheckoutHosts } from "@/modules/commerce/checkout-url";
 import { salesStats } from "@/modules/customers/events.service";
-import { getPrimaryStore, parseJsonArray, parseJsonObject } from "@/modules/stores/store.service";
+import { parseJsonArray, parseJsonObject } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -170,7 +171,7 @@ export default async function AdminOverviewPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
 
   if (!store) {
     return (

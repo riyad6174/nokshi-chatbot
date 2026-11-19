@@ -16,6 +16,7 @@ import {
 } from "@/lib/validation/schemas";
 import { logger } from "@/lib/logging/logger";
 import { invalidateCatalog } from "@/modules/catalog/product.service";
+import { refreshKnowledgeEmbeddings } from "@/modules/search/embeddings.service";
 import { updateUnansweredQuestion } from "@/modules/knowledge/learning.service";
 import { snapshotKnowledgeVersion } from "@/modules/knowledge/versions.service";
 import { recordPromptVersion } from "@/modules/ai/prompt-versions.service";
@@ -354,6 +355,9 @@ export async function updateKnowledgeAction(formData: FormData) {
       contentHash: createHash("sha256").update(parsed.data.content).digest("hex"),
     },
   });
+  // Without this the old vector keeps ranking the edited text until the next cron run. The refresh
+  // compares text hashes, so it only re-embeds documents whose text actually changed.
+  void refreshKnowledgeEmbeddings(store.id).catch(() => undefined);
   await snapshotKnowledgeVersion({
     storeId: store.id,
     documentId: id,

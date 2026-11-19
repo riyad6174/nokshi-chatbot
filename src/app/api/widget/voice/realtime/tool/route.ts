@@ -6,6 +6,7 @@ import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
 import { logger } from "@/lib/logging/logger";
 import { rateLimit } from "@/lib/rate-limit";
 import { executeTool } from "@/modules/ai/tools";
+import { knowledgeSourcesFrom } from "@/modules/ai/tools/search-knowledge";
 import { getSessionContext } from "@/modules/conversations/session.service";
 import {
   changesOrderState,
@@ -62,6 +63,10 @@ export async function POST(request: NextRequest) {
   );
   if (!result.ok) logger.warn("realtime.tool_rejected", { tool: parsed.data.name });
   if (result.ui?.length) rememberShownParts(context.conversationId, result.ui);
+  if (parsed.data.name === "search_knowledge" && result.ok) {
+    const sources = knowledgeSourcesFrom(result.content).slice(0, 2);
+    if (sources.length) rememberShownParts(context.conversationId, [{ type: "knowledge_sources", sources }]);
+  }
   // The cart or order changed: the next order step changed with it, and the model's very next words
   // should already follow it. It goes inside the tool result, not into the session instructions:
   // changing those mid-call breaks the prompt cache for the rest of the call.

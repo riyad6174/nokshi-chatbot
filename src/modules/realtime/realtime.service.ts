@@ -138,6 +138,9 @@ export async function realtimeStateNote(context: SessionContext): Promise<string
     .join(" ");
 }
 
+/** Writes down what the customer says on a live call (billed separately; recorded in the usage ledger). */
+export const REALTIME_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+
 /** Session instructions for the current state of the customer's cart, order and saved details. */
 export async function realtimeInstructions(context: SessionContext): Promise<string> {
   const [cart, openOrder, savedDetails] = await Promise.all([
@@ -155,6 +158,7 @@ export async function realtimeInstructions(context: SessionContext): Promise<str
     openOrder,
     savedDetails,
     replyLanguage: "auto",
+    liveCall: true,
   });
   return `${base}\n\n${liveCallRules(pickWaitFiller(context.conversationId))}\n\n${SOUND_HUMAN}\n\nHOW YOU SOUND: ${realtimeSettings(context.store).style}`;
 }
@@ -211,17 +215,21 @@ export async function createRealtimeSession(context: SessionContext): Promise<Re
         // block rather than a little every turn, so the cached prefix keeps matching. The output cap
         // only stops runaway speech: replies are one sentence, and the longest normal reply (the
         // order read-back, with the phone number digit by digit) fits well within it.
-        truncation: { type: "retention_ratio", retention_ratio: 0.7 },
+        // 0.5: when a long call hits the limit, drop half at once, so later replies carry less
+        // history and truncation happens less often (each truncation re-bills the prefix uncached).
+        truncation: { type: "retention_ratio", retention_ratio: 0.5 },
         max_output_tokens: 600,
         audio: {
           input: {
             // Transcripts are what the chat, the inbox and the AI's memory show.
             transcription: {
-              model: "gpt-4o-mini-transcribe",
+              model: REALTIME_TRANSCRIBE_MODEL,
               prompt: "A customer talking to an online shop assistant in Bangla or English: products, prices, cart, order, delivery, name, phone number, address.",
             },
             noise_reduction: { type: "near_field" },
-            turn_detection: { type: "semantic_vad", eagerness: "auto", create_response: true, interrupt_response: true },
+            // "low" waits until the customer has clearly finished, so fewer replies start on a pause or
+            // background noise and are then interrupted (each one is a billed response).
+            turn_detection: { type: "semantic_vad", eagerness: "low", create_response: true, interrupt_response: true },
           },
           output: { voice: voice.voice, speed: voice.speed },
         },

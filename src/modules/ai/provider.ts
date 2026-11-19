@@ -243,6 +243,9 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
       tool_choice: input.toolChoice ?? "auto",
       ...(reasoning ? {} : { temperature: input.temperature ?? 0.2 }),
       ...(!reasoning && input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
+      // Reasoning models: shallow reasoning is plenty for shop chat, and the cap (which includes
+      // reasoning tokens) stops a runaway reply. Only OpenAI's own API is known to take these.
+      ...(reasoning && isOpenAiApi(config.baseUrl) ? { reasoning_effort: "low", max_completion_tokens: 4000 } : {}),
       // Only OpenAI's own API knows this field; other compatible servers may reject unknown fields.
       ...(input.cacheKey && isOpenAiApi(config.baseUrl) ? { prompt_cache_key: input.cacheKey } : {}),
       // Only OpenAI's own API is known to accept this field. Usage from other compatible

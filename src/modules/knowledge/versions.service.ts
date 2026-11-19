@@ -159,7 +159,8 @@ export async function restoreKnowledgeDocument(input: {
   if (!isObjectId(input.storeId) || !isObjectId(input.documentId)) return false;
   const result = await prisma.knowledgeDocument.updateMany({
     where: { id: input.documentId, storeId: input.storeId },
-    data: { status: "ready", embedding: [], embeddingHash: null },
+    // Text is unchanged, so the stored vector is still right; the refresh only embeds if it is missing.
+    data: { status: "ready" },
   });
   if (result.count === 0) return false;
   void refreshKnowledgeEmbeddings(input.storeId).catch(() => undefined);

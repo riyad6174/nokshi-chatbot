@@ -64,8 +64,10 @@ describe("AI cannot bypass checkout validation", () => {
     await prisma.customerProfile.create({
       data: { storeId: session.storeId, visitorIds: [session.visitorId], interests: [], name: "Rahim", phone: "01712345678", phoneKey: "1712345678", address: "House 4, Road 2, Dhanmondi" },
     });
-    turns.push(() => [toolCall("add_to_cart", { productId: fx.products.scarf.id })]);
-    turns.push(() => [toolCall("propose_order", {})]);
+    // Two tool rounds per turn: add and propose together, then try to confirm.
+    const add = toolCall("add_to_cart", { productId: fx.products.scarf.id }, "call_add") as Extract<ProviderStreamEvent, { type: "done" }>;
+    const propose = toolCall("propose_order", {}, "call_propose") as Extract<ProviderStreamEvent, { type: "done" }>;
+    turns.push(() => [{ ...add, toolCalls: [...add.toolCalls, ...propose.toolCalls] }]);
     turns.push(() => [toolCall("confirm_order", {})]);
     turns.push(() => say("Placed!"));
     const events = await run(session, "buy the scarf and place the order");

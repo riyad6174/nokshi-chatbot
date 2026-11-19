@@ -12,7 +12,7 @@ import {
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db/prisma";
 import { listKnowledgeVersions } from "@/modules/knowledge/versions.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,7 @@ export default async function KnowledgeDetailPage({
   await requireAdmin();
   const { id } = await params;
   const { saved, error } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured." />;
 
   const document = await prisma.knowledgeDocument.findFirst({ where: { id, storeId: store.id } });

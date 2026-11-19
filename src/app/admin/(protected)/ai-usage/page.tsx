@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { resolveAiStatus } from "@/modules/ai/config";
 import { listModelPricing } from "@/modules/ai/pricing.service";
 import { storeUsage, USAGE_PERIODS } from "@/modules/analytics/usage.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +40,7 @@ export default async function AiUsagePage({
   await requireAdmin();
   const { days: rawDays, pricing: editingId, saved, error, repriced: rawRepriced } = await searchParams;
   const repriced = Number.parseInt(rawRepriced ?? "0", 10) || 0;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   const period = USAGE_PERIODS.find((value) => String(value) === rawDays) ?? 30;
@@ -98,7 +98,7 @@ export default async function AiUsagePage({
         </div>
       </div>
 
-      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Tile
           label="Estimated spend"
           value={usd(data.totals.costMicros)}
@@ -117,6 +117,15 @@ export default async function AiUsagePage({
           }`}
         />
         <Tile label="Conversations" value={tokens(data.totals.conversations)} detail="with recorded usage" />
+        <Tile
+          label="Per chat message"
+          value={data.perTurn.callsPerTurn == null ? "—" : `${Math.round(data.perTurn.callsPerTurn * 10) / 10} AI calls`}
+          detail={
+            data.perTurn.promptTokensPerTurn == null
+              ? "no AI chat turns yet"
+              : `${tokens(data.perTurn.promptTokensPerTurn)} prompt tokens · ${tokens(data.perTurn.turns)} turns`
+          }
+        />
       </section>
 
       {data.totals.unpricedEvents > 0 ? (

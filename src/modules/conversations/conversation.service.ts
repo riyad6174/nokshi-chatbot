@@ -6,9 +6,12 @@ import type { AttachmentData, ChatMessage, ChatPart, ChatRole, ConversationMode 
 function parseParts(structuredContent: string | null, fallbackText: string): ChatPart[] {
   if (!structuredContent) return fallbackText ? [{ type: "text", text: fallbackText }] : [];
   try {
-    const parsed = JSON.parse(structuredContent) as ChatPart[];
-    if (!Array.isArray(parsed) || parsed.length === 0) return [{ type: "text", text: fallbackText }];
-    return parsed;
+    const parsed = (JSON.parse(structuredContent) as ChatPart[]);
+    if (!Array.isArray(parsed)) return [{ type: "text", text: fallbackText }];
+    // Model-only memory, not something to show.
+    const visible = parsed.filter((part) => part.type !== "knowledge_sources" && part.type !== "fallback_reply");
+    if (visible.length === 0) return [{ type: "text", text: fallbackText }];
+    return visible;
   } catch {
     return [{ type: "text", text: fallbackText }];
   }
@@ -130,8 +133,14 @@ function describeShownParts(structuredContent: string | null, options: { brief?:
     return "";
   }
   const lines: string[] = [];
+  const sources: string[] = [];
   for (const part of parts) {
-    if (part.type === "product_list") {
+    if (part.type === "knowledge_sources") {
+      for (const source of part.sources.slice(0, 2)) {
+        const excerpt = source.excerpt.length > 300 ? `${source.excerpt.slice(0, 300)}...` : source.excerpt;
+        sources.push(`- ${source.title}: ${excerpt.replace(/\s+/g, " ")}`);
+      }
+    } else if (part.type === "product_list") {
       for (const product of part.products.slice(0, 6)) {
         const versions = options.brief
           ? ""
@@ -149,7 +158,9 @@ function describeShownParts(structuredContent: string | null, options: { brief?:
       lines.push("- (This was a proactive suggestion the assistant sent on its own, not an answer to a question.)");
     }
   }
-  return lines.length > 0 ? `[On screen with this reply:\n${lines.join("\n")}]` : "";
+  const shown = lines.length > 0 ? `[On screen with this reply:\n${lines.join("\n")}]` : "";
+  const based = sources.length > 0 ? `[Store information this reply used:\n${sources.join("\n")}]` : "";
+  return [shown, based].filter(Boolean).join("\n");
 }
 
 export type ProviderHistoryRow = Pick<
@@ -183,9 +194,13 @@ function toHistoryMessage(
     const extra = describeAttachments(row.attachments, row.content);
     return { role: "user", content: [row.content, extra].filter(Boolean).join("\n") };
   }
+  // The fallback text ("I could not find that…") in the history taught the model to say it again;
+  // keep only the fact that this question went unanswered (and any cards that were still shown).
+  const fallback = row.role === "assistant" && Boolean(row.structuredContent?.includes('"fallback_reply"'));
   const prefix = row.role === "agent" ? `[Reply from store staff${row.senderName ? ` ${row.senderName}` : ""}] ` : "";
+  const text = fallback ? "[No answer was given to this; answer it now if you can.]" : `${prefix}${row.content}`;
   const shown = row.role === "assistant" ? describeShownParts(row.structuredContent, { brief: options.briefShown }) : "";
-  return { role: "assistant", content: [`${prefix}${row.content}`, shown].filter(Boolean).join("\n") };
+  return { role: "assistant", content: [text, shown].filter(Boolean).join("\n") };
 }
 
 function showsProductList(structuredContent: string | null): boolean {
@@ -211,7 +226,9 @@ export function historyCost(text: string): number {
  */
 export function buildProviderHistory(
   rows: ProviderHistoryRow[],
-  maxChars = 10_000,
+  // ~1.5k tokens of recent turns; older ones are covered by the stored summary. Every tool round
+  // re-sends this, so it is one of the biggest per-turn costs.
+  maxChars = 6_000,
 ): { history: { role: "user" | "assistant"; content: string }[]; cutoff: Date | null } {
   const selected: { role: "user" | "assistant"; content: string; createdAt: Date }[] = [];
   let used = 0;

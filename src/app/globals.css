@@ -492,8 +492,9 @@
   100% { transform: translate3d(-30px, 50px, 0) scale(0.95); }
 }
 
+/* Short and starting half-visible, so a page (or its loading skeleton) shows the moment it's opened. */
 @keyframes admin-enter {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0.5; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -503,7 +504,7 @@
 }
 
 .admin-main {
-  animation: admin-enter 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: admin-enter 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 .admin-scroll {
@@ -904,4 +905,59 @@
   .admin-main :is(a, button):hover {
     transform: none !important;
   }
+}
+
+/* Loading skeletons: a soft bone with a slow champagne sheen, shown while a page's data loads. */
+/* In the components layer so a bone's own rounded-* class still wins. */
+@layer components {
+  .admin-skeleton {
+    position: relative;
+    overflow: hidden;
+    border-radius: 0.5rem;
+    background-color: rgb(255 255 255 / 0.055);
+  }
+}
+
+.admin-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgb(255 255 255 / 0.06) 42%,
+    rgb(216 184 120 / 0.09) 50%,
+    rgb(255 255 255 / 0.06) 58%,
+    transparent 80%
+  );
+  animation: admin-shimmer 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes admin-shimmer {
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-skeleton::after {
+    animation: none;
+    transform: none;
+    opacity: 0.5;
+  }
+}
+
+/* Top navigation bar: eases towards 90% while loading, then fills and fades. */
+.admin-nav-progress {
+  animation: admin-nav-progress 8s cubic-bezier(0.08, 0.8, 0.2, 1) forwards;
+}
+
+.admin-nav-progress-done {
+  transform: scaleX(1);
+  opacity: 0;
+  transition: transform 160ms ease-out, opacity 260ms ease 120ms;
+}
+
+@keyframes admin-nav-progress {
+  from { transform: scaleX(0.05); }
+  to { transform: scaleX(0.9); }
 }

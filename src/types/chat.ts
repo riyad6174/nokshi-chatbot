@@ -118,7 +118,14 @@ export type ChatPart =
   /** Side-by-side catalog facts for 2-4 products. */
   | { type: "comparison"; products: ProductCardData[]; rows: Array<{ label: string; values: string[] }> }
   /** Buttons under a proactive suggestion: "No thanks" and "Stop suggestions". */
-  | { type: "suggestion_actions"; suggestionId: string; trigger: string };
+  | { type: "suggestion_actions"; suggestionId: string; trigger: string }
+  /**
+   * The policy excerpts a reply was based on. Saved with the message for the model's memory, so a
+   * follow-up ("and for Chittagong?") is answered from the same source. Never sent to the widget.
+   */
+  | { type: "knowledge_sources"; sources: Array<{ title: string; excerpt: string }> }
+  /** The reply was the store's fallback text (no real answer). Model memory only; never shown. */
+  | { type: "fallback_reply" };
 
 export type AttachmentData = {
   uploadId: string;

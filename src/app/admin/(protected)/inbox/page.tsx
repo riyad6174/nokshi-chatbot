@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AdminBanner } from "@/components/dashboard/AdminBanner";
+import { AdminPagination } from "@/components/dashboard/AdminPagination";
 import { AutoRefresh } from "@/components/dashboard/AutoRefresh";
 import { ConversationStatusBadge } from "@/components/dashboard/ConversationStatusBadge";
 import { requireAdmin } from "@/lib/auth/admin";
@@ -10,7 +11,7 @@ import {
   parseInboxFilter,
   type InboxFilter,
 } from "@/modules/conversations/conversation.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -36,20 +37,10 @@ function inboxHref(filter: InboxFilter, page = 1): string {
   return `/admin/inbox?filter=${filter}${page > 1 ? `&page=${page}` : ""}`;
 }
 
-/** Page numbers to show: the first, the last, and two either side of the current one, with gaps. */
-function pageNumbers(current: number, total: number): Array<number | "gap"> {
-  const pages: Array<number | "gap"> = [];
-  for (let page = 1; page <= total; page += 1) {
-    if (page === 1 || page === total || Math.abs(page - current) <= 2) pages.push(page);
-    else if (pages.at(-1) !== "gap") pages.push("gap");
-  }
-  return pages;
-}
-
 export default async function InboxPage({ searchParams }: { searchParams: Promise<{ filter?: string; page?: string }> }) {
   await requireAdmin();
   const { filter: rawFilter, page: rawPage } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   // Always opens on every chat; the red badge and the "Needs human" tab surface the waiting ones.
@@ -160,69 +151,8 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         )}
       </ul>
 
-      {total > 0 ? (
-        <nav aria-label="Inbox pages" className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[11.5px] text-stone-500">
-            Showing {from}–{to} of {total}
-          </p>
-          {pageCount > 1 ? (
-            <div className="flex flex-wrap items-center gap-1">
-              <PageLink href={inboxHref(filter, page - 1)} disabled={page === 1} label="Previous page">
-                ‹ Prev
-              </PageLink>
-              {pageNumbers(page, pageCount).map((entry, index) =>
-                entry === "gap" ? (
-                  <span key={`gap-${index}`} className="px-1 text-[11.5px] text-stone-400">
-                    …
-                  </span>
-                ) : (
-                  <PageLink key={entry} href={inboxHref(filter, entry)} current={entry === page} label={`Page ${entry}`}>
-                    {entry}
-                  </PageLink>
-                ),
-              )}
-              <PageLink href={inboxHref(filter, page + 1)} disabled={page === pageCount} label="Next page">
-                Next ›
-              </PageLink>
-            </div>
-          ) : null}
-        </nav>
-      ) : null}
+      <AdminPagination label="Inbox pages" page={page} pageCount={pageCount} total={total} from={from} to={to} hrefFor={(entry) => inboxHref(filter, entry)} />
     </div>
   );
 }
 
-function PageLink({
-  href,
-  children,
-  label,
-  current = false,
-  disabled = false,
-}: {
-  href: string;
-  children: React.ReactNode;
-  label: string;
-  current?: boolean;
-  disabled?: boolean;
-}) {
-  const base = "min-w-[30px] rounded-lg px-2.5 py-1 text-center text-[11.5px] font-medium";
-  if (disabled) {
-    return (
-      <span aria-disabled className={`${base} cursor-not-allowed text-stone-400 opacity-50`}>
-        {children}
-      </span>
-    );
-  }
-  return (
-    <Link
-      href={href}
-      aria-label={label}
-      aria-current={current ? "page" : undefined}
-      className={`${base} transition ${
-        current ? "bg-stone-900 text-white" : "border border-stone-300 text-stone-700 hover:text-stone-900"
-      }`}
-    >
-      {children}
-    </Link>
-  );
-}

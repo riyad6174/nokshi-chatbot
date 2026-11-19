@@ -9,7 +9,7 @@ import { resolveSalesConfig, type SalesConfig } from "@/modules/sales/config";
 import { detectShoppingIntent } from "@/modules/sales/intent";
 import { buildSalesTurnContext } from "@/modules/sales/prompt";
 import { getEngagementState, isOptedOut, type EngagementState } from "@/modules/sales/state";
-import { buildSystemPromptParts } from "@/modules/ai/system-instructions";
+import { buildSystemPromptParts, historyAskedName } from "@/modules/ai/system-instructions";
 import { describeOpenProposal } from "@/modules/orders/voice-order.service";
 import { findProfileForVisitor, savedDetailsFromProfile } from "@/modules/customers/profile.service";
 import type { CustomerProfile } from "@prisma/client";
@@ -17,6 +17,7 @@ import { detectLang } from "@/modules/speech/speech-provider";
 import { addUsage, emptyUsage, type NormalizedUsage } from "@/modules/ai/usage";
 import { canRunInParallel, executeTool, getProviderTools } from "@/modules/ai/tools";
 import { compactToolContent } from "@/modules/ai/tools/helpers";
+import { knowledgeSourcesFrom } from "@/modules/ai/tools/search-knowledge";
 import type { ToolContext } from "@/modules/ai/tools/types";
 import type { SessionContext } from "@/modules/conversations/session.service";
 import type { TurnChannel } from "@/modules/conversations/turn.service";
@@ -57,9 +58,10 @@ export type AssistantHistoryMessage = { role: "user" | "assistant"; content: str
 /**
  * Rounds in which the model may call tools. One more round follows, if needed, to reply in text.
  * Every round sends the whole prompt again. In real turns (Aug–Nov 2026) no turn made more than 2
- * tool calls, so 3 rounds only caps a runaway turn at 4 requests instead of 6.
+ * tool calls, and lookups in one round run together, so 2 rounds cover search -> add -> reply while
+ * capping a runaway turn at 3 requests.
  */
-const MAX_TOOL_ITERATIONS = 3;
+const MAX_TOOL_ITERATIONS = 2;
 
 type PartBuilder = {
   text: () => string;
@@ -107,7 +109,7 @@ function createPartBuilder(): PartBuilder {
 function fallbackText(storeFallback: string | null | undefined): string {
   return (
     storeFallback?.trim() ||
-    "I could not complete that request. Please try again, or contact support@nokshibazaar.example."
+    "I could not complete that request. Please try again, or ask to talk to our team."
   );
 }
 
@@ -131,7 +133,6 @@ export async function* runLiveAssistant(input: {
     latestUserText,
   };
   const settings = input.session.store.settings;
-  const tools = getProviderTools(settings?.enabledFeatures);
   const salesConfig = resolveSalesConfig(settings);
   const preModelStarted = Date.now();
   // Everything the prompt needs, loaded at once (each is a database round-trip). The visitor's
@@ -156,6 +157,7 @@ export async function* runLiveAssistant(input: {
   ]);
   toolContext.cartItemCount = input.cart.itemCount;
   toolContext.openOrder = Boolean(openOrder);
+  const tools = getProviderTools(settings?.enabledFeatures, { cartItemCount: input.cart.itemCount, openOrder: Boolean(openOrder) });
   const savedDetails = savedDetailsFromProfile(profile);
   const salesTurn = engagement
     ? await salesTurnContext({
@@ -174,6 +176,7 @@ export async function* runLiveAssistant(input: {
     savedDetails,
     salesTurn,
     conversationSummary: input.conversationSummary,
+    askedName: historyAskedName(input.history),
     replyLanguage: detectLang(latestUserText, input.session.locale.startsWith("bn") ? "bn" : "en"),
     session: input.session,
     cart: input.cart,
@@ -199,6 +202,8 @@ export async function* runLiveAssistant(input: {
 
   const builder = createPartBuilder();
   const toolLog: ToolLogEntry[] = [];
+  /** Policy excerpts the reply used, saved with it so follow-ups stay grounded. */
+  const knowledgeSources: Array<{ title: string; excerpt: string }> = [];
   let receivedAnyText = false;
   let turnRefused = false;
   let totalUsage = emptyUsage();
@@ -327,6 +332,9 @@ export async function* runLiveAssistant(input: {
           error: (result.content as { error?: { code?: string } })?.error?.code,
         });
       }
+      if (call.function.name === "search_knowledge" && result.ok) {
+        knowledgeSources.push(...knowledgeSourcesFrom(result.content));
+      }
       const serialized = JSON.stringify(compactToolContent(result.content));
       messages.push({
         role: "tool",
@@ -350,7 +358,12 @@ export async function* runLiveAssistant(input: {
     yield { type: "delta", text };
   }
 
-  const parts = builder.finish();
+  const shownParts = builder.finish();
+  const parts: ChatPart[] = missed
+    ? [...shownParts, { type: "fallback_reply" }]
+    : knowledgeSources.length > 0
+      ? [...shownParts, { type: "knowledge_sources", sources: knowledgeSources.slice(0, 2) }]
+      : shownParts;
   logger.info("ai.turn_timing", {
     storeId: input.session.storeId,
     channel: input.channel ?? "text",

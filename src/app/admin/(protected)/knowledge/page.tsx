@@ -11,7 +11,7 @@ import {
 import { prisma } from "@/lib/db/prisma";
 import { listUnansweredQuestions } from "@/modules/knowledge/learning.service";
 import { listKnowledgeForAdmin } from "@/modules/knowledge/retrieval.service";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +38,7 @@ export default async function AdminKnowledgePage({
   searchParams: Promise<{ tab?: string; saved?: string; error?: string }>;
 }) {
   const { tab: rawTab, saved, error } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
   const tab: TabId = TABS.some((entry) => entry.id === rawTab) ? (rawTab as TabId) : "published";
 

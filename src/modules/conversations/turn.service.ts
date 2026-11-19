@@ -25,6 +25,7 @@ import { captureUnansweredQuestion } from "@/modules/knowledge/learning.service"
 import { detectShoppingIntent } from "@/modules/sales/intent";
 import { getEngagementState, isOptedOut, setSuggestionOptOut } from "@/modules/sales/state";
 import type { ChatPart } from "@/types/chat";
+import { runSerialized } from "@/modules/conversations/turn-queue";
 
 export type TurnChannel = "text" | "voice";
 export type TurnSend = (event: string, data: unknown) => void;
@@ -37,7 +38,7 @@ export type TurnSend = (event: string, data: unknown) => void;
  * SSE events sent: message.delta {text} · message.status {tool} · ui.part {part} · ui.cart {cart} · message.event {message}
  * · conversation.mode {mode} · message.completed {messageId} · message.error {message, retryable}
  */
-export async function runConversationTurn(input: {
+type TurnInput = {
   context: SessionContext;
   conversation: Pick<Conversation, "id" | "status">;
   userText: string;
@@ -47,7 +48,25 @@ export async function runConversationTurn(input: {
   send: TurnSend;
   /** When the request arrived (Date.now()), so reported latency includes loading, not just the AI. */
   requestStartedAt?: number;
-}): Promise<void> {
+};
+
+/**
+ * Turns of one conversation run one at a time. Two quick messages used to start two AI turns at
+ * once: both saw both questions, answered them twice, and could save replies out of order. Now the
+ * second waits for the first, then sees its reply in the history and only answers what's new.
+ * The queue is per server instance, which covers a customer's messages on one connection; a turn
+ * stuck longer than the wait limit doesn't block the next one forever.
+ */
+export async function runConversationTurn(input: TurnInput): Promise<void> {
+  await runSerialized(input.conversation.id, input.signal, async (waited) => {
+    if (!waited) return runTurn(input);
+    // The earlier turn may have handed the chat to a person meanwhile.
+    const current = await prisma.conversation.findUnique({ where: { id: input.conversation.id }, select: { status: true } });
+    return runTurn(current ? { ...input, conversation: { ...input.conversation, status: current.status } } : input);
+  });
+}
+
+async function runTurn(input: TurnInput): Promise<void> {
   const { context, conversation, userText, attachments, send } = input;
   const settings = context.store.settings;
   const handoffOptions = {

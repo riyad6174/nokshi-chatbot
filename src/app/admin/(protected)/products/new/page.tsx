@@ -3,7 +3,7 @@ import { AdminBanner } from "@/components/dashboard/AdminBanner";
 import { ProductForm } from "@/components/dashboard/ProductForm";
 import { createProductAction } from "@/app/admin/actions";
 import { requireAdmin } from "@/lib/auth/admin";
-import { getPrimaryStore } from "@/modules/stores/store.service";
+import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export default async function NewProductPage({
 }) {
   await requireAdmin();
   const { error } = await searchParams;
-  const store = await getPrimaryStore();
+  const store = await getAdminPageStore();
   if (!store) return <AdminBanner error="No store configured. Run npm run db:seed." />;
 
   return (
