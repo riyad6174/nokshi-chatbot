@@ -132,6 +132,10 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   );
   const [session, setSession] = useState<WidgetSessionResponse | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /** From the tap on "start talking" until the call is up (or failed): drives the "Connecting…" state. */
+  const [voiceStarting, setVoiceStarting] = useState(false);
+  /** Messages that existed when the current call started: never shown as the call's caption. */
+  const captionBaselineRef = useRef<Set<string> | null>(null);
   const [cart, setCart] = useState<CartPayload | null>(null);
   const [mode, setMode] = useState<ConversationMode>("bot");
   const [agentName, setAgentName] = useState<string | null>(null);
@@ -726,20 +730,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           ? "browser"
           : null;
 
-  const startVoiceAssistant = useCallback(async () => {
-    // A call is already running (the panel was only closed): show it. Priming the audio or starting
-    // again would cut off what the assistant is saying and repeat its greeting.
-    if (voiceActiveRef.current) {
-      setView("voice");
-      setOpen(true);
-      return;
-    }
-    // Inside the click: unlock audio before anything is awaited.
-    cascadeVoice.prime();
-    realtimeVoice.prime();
-    geminiVoice.prime();
-    setView("voice");
-    setOpen(true);
+  const startVoiceCall = useCallback(async () => {
     const active = sessionRef.current ?? (await initSession());
     if (!active) return;
     if (!window.isSecureContext) {
@@ -798,6 +789,31 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       // The opener is optional; the assistant is already listening.
     }
   }, [cascadeVoice, geminiVoice, initSession, realtimeVoice]);
+
+  const startVoiceAssistant = useCallback(async () => {
+    // A call is already running (the panel was only closed): show it. Priming the audio or starting
+    // again would cut off what the assistant is saying and repeat its greeting.
+    if (voiceActiveRef.current) {
+      setView("voice");
+      setOpen(true);
+      return;
+    }
+    // Inside the click: unlock audio before anything is awaited.
+    cascadeVoice.prime();
+    realtimeVoice.prime();
+    geminiVoice.prime();
+    setView("voice");
+    setOpen(true);
+    // Show "Connecting…" from the tap on (loading the chat session can take a moment), and start
+    // the call with an empty caption: only what's said on this call is shown, never older replies.
+    captionBaselineRef.current = null;
+    setVoiceStarting(true);
+    try {
+      await startVoiceCall();
+    } finally {
+      setVoiceStarting(false);
+    }
+  }, [cascadeVoice, geminiVoice, realtimeVoice, startVoiceCall]);
 
   // Get a call ready before the tap (the customer reaches for the launcher, or the welcome bubble
   // appears): the chat session loads and a live-call token is fetched, so a tap connects fast.
@@ -876,7 +892,9 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const talking = voiceSession.active && ["hearing", "thinking", "speaking", "listening"].includes(voiceSession.phase);
   const headerOrbState: OrbState = talking ? (voiceSession.phase as OrbState) : "still";
   const callPhase = voiceSession.phase;
-  const launcherOrbState: OrbState = voiceSession.active
+  const launcherOrbState: OrbState = voiceStarting && !voiceSession.active
+    ? "thinking"
+    : voiceSession.active
     ? callPhase === "off" || callPhase === "starting"
       ? "thinking"
       : callPhase
@@ -938,9 +956,15 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
 
   // The voice panel shows only what the assistant is saying now: its latest reply, until the
   // customer speaks again.
+  // Snapshot what's already in the chat the moment the call goes live; only newer replies are captions.
+  if (voiceSession.active && !captionBaselineRef.current) captionBaselineRef.current = new Set(messages.map((message) => message.id));
   const latestReply = (() => {
+    const baseline = captionBaselineRef.current;
+    // No call yet, or still connecting: nothing to caption (the dock shows its own status text).
+    if (!baseline || (voiceStarting && !voiceSession.active)) return null;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index]!;
+      if (baseline.has(message.id)) return null;
       if (message.role === "user") return null;
       if (message.role === "assistant" || message.role === "agent") return message;
     }
@@ -1396,9 +1420,9 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           position={position}
           assistantName={session?.settings.assistantName ?? "Shopping assistant"}
           accent={accent}
-          phase={voiceSession.phase}
+          phase={voiceStarting && !voiceSession.active ? "starting" : voiceSession.phase}
           level={voiceSession.level}
-          active={voiceSession.active}
+          active={voiceSession.active || voiceStarting}
           caption={caption}
           captionKey={latestReply?.id ?? "none"}
           workingLabel={workingLabel}

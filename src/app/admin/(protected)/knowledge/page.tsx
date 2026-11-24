@@ -12,6 +12,7 @@ import { prisma } from "@/lib/db/prisma";
 import { listUnansweredQuestions } from "@/modules/knowledge/learning.service";
 import { listKnowledgeForAdmin } from "@/modules/knowledge/retrieval.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDateTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -254,7 +255,7 @@ export default async function AdminKnowledgePage({
                 </div>
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-[10px] text-stone-400">
-                    Updated {new Date(document.updatedAt).toLocaleString()} · hash{" "}
+                    Updated {formatDateTime(document.updatedAt)} · hash{" "}
                     <span className="font-mono">{document.contentHash.slice(0, 10)}…</span>
                   </p>
                   {tab === "archived" ? (

@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db/prisma";
 import { formatMinor } from "@/lib/money";
 import { ORDER_STATUSES, STATUS_LABELS, listOrdersForAdmin } from "@/modules/orders/order.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDateTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -83,7 +84,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     <Link href={`/admin/orders/${order.id}`} className="font-mono font-semibold text-stone-900 underline-offset-2 hover:underline">
                       {order.orderNumber}
                     </Link>
-                    <p className="text-[10.5px] text-stone-400">{order.createdAt.toLocaleString("en-BD")}</p>
+                    <p className="text-[10.5px] text-stone-400">{formatDateTime(order.createdAt)}</p>
                   </td>
                   <td className="px-3 py-2.5">
                     <p className="text-stone-800">{order.customer.name}</p>

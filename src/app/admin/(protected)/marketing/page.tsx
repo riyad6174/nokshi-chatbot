@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db/prisma";
 import { MARKETING_CHANNELS, type MarketingChannel } from "@/modules/marketing/consent";
 import { parseSegment, previewSegment } from "@/modules/marketing/segments";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDateTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -259,7 +260,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
                 <span className="text-[11px] text-stone-500">
                   {message.status}
                   {message.reason ? ` (${message.reason})` : ""}
-                  {message.clickedAt ? " · clicked" : ""} · {message.createdAt.toLocaleString("en-BD")}
+                  {message.clickedAt ? " · clicked" : ""} · {formatDateTime(message.createdAt)}
                 </span>
               </li>
             ))}

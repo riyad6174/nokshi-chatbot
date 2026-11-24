@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { formatMinor } from "@/lib/money";
 import { PERIODS, storeAnalytics } from "@/modules/analytics/analytics.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDate } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +73,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <div>
           <h1 className="font-serif text-2xl text-stone-900">Analytics</h1>
           <p className="mt-1 text-[12px] text-stone-500">
-            {store.name} · last {days} days (since {new Date(data.since).toLocaleDateString("en-BD")})
+            {store.name} · last {days} days (since {formatDate(data.since)})
           </p>
         </div>
         <nav aria-label="Reporting period" className="flex gap-1">
@@ -153,7 +154,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
               <li key={`${entry.at}-${entry.text}`} className="flex justify-between gap-3 py-1">
                 <span className="text-stone-800">“{entry.text}”</span>
                 <span className="shrink-0 text-[11px] text-stone-500">
-                  {entry.outcome} · {new Date(entry.at).toLocaleDateString("en-BD")}
+                  {entry.outcome} · {formatDate(entry.at)}
                 </span>
               </li>
             ))}

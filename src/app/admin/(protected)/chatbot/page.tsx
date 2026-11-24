@@ -18,6 +18,7 @@ import { CONVERSATION_STYLES, TONES } from "@/modules/ai/system-instructions";
 import { MAPPING_FIELDS, parseMapping, triggerAutoSyncIfDue } from "@/modules/catalog/product-sync.service";
 import { parseJsonArray, parseJsonObject } from "@/modules/stores/store.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDate } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ function relativeTime(date: Date | null): string {
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
-  return hours < 48 ? `${hours} h ago` : date.toLocaleDateString("en-BD");
+  return hours < 48 ? `${hours} h ago` : formatDate(date);
 }
 
 export default async function ConfigureChatbotPage({

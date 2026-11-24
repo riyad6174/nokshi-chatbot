@@ -12,6 +12,7 @@ import {
   type InboxFilter,
 } from "@/modules/conversations/conversation.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatAgo } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -23,13 +24,6 @@ const FILTERS: Array<{ id: InboxFilter; label: string }> = [
   { id: "closed", label: "Resolved" },
 ];
 
-function ago(date: Date): string {
-  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return "now";
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  if (seconds < 86_400) return `${Math.round(seconds / 3600)}h`;
-  return date.toLocaleDateString("en-BD");
-}
 
 const PAGE_SIZE = 25;
 
@@ -146,7 +140,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                           : "No messages yet"}
                     </p>
                   </div>
-                  <span className="shrink-0 text-[10.5px] text-stone-400">{ago(conversation.lastMessageAt)}</span>
+                  <span className="shrink-0 text-[10.5px] text-stone-400">{formatAgo(conversation.lastMessageAt)}</span>
                 </Link>
               </li>
             );

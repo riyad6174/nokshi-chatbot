@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getAdminUser } from "@/lib/auth/admin";
-import { LuArrowRight, LuCircleAlert, LuLock, LuMail, LuSparkles } from "react-icons/lu";
+import { LuCircleAlert, LuLock, LuMail, LuSparkles } from "react-icons/lu";
+import { LoginSubmitButton } from "@/components/dashboard/LoginSubmitButton";
 import { loginAction } from "@/app/admin/auth-actions";
 
 export const metadata: Metadata = {
@@ -96,13 +97,7 @@ export default async function AdminLoginPage({
             />
           </div>
 
-          <button
-            type="submit"
-            className="group mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-[#f3e1b8] via-[#d8b878] to-[#b18c4b] px-4 py-2.5 text-[13px] font-semibold text-[#191307] shadow-[0_18px_40px_-18px_rgba(216,184,120,0.8)] transition hover:-translate-y-px hover:brightness-105"
-          >
-            Sign in
-            <LuArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" aria-hidden />
-          </button>
+          <LoginSubmitButton />
 
           {showDemoHint ? (
             <p className="mt-5 rounded-xl border border-white/5 bg-black/20 px-3 py-2.5 text-[10.5px] leading-relaxed text-stone-400">

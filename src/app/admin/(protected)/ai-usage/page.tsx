@@ -6,6 +6,7 @@ import { resolveAiStatus } from "@/modules/ai/config";
 import { listModelPricing } from "@/modules/ai/pricing.service";
 import { storeUsage, USAGE_PERIODS } from "@/modules/analytics/usage.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDate } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,7 @@ export default async function AiUsagePage({
         <div>
           <h1 className="font-serif text-2xl text-stone-900">AI usage &amp; cost</h1>
           <p className="mt-1 text-[12px] text-stone-500">
-            {store.name} · last {period} days (since {new Date(data.since).toLocaleDateString("en-US")}). Costs are
+            {store.name} · last {period} days (since {formatDate(data.since)}). Costs are
             estimated in USD from the pricing rows below.
           </p>
         </div>

@@ -9,6 +9,7 @@ import {
   type CustomerFilter,
 } from "@/modules/customers/admin.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDateTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -126,7 +127,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                       <span className="text-[10.5px] text-stone-400">Not asked</span>
                     )}
                   </td>
-                  <td className="px-3 py-2.5 text-[11px] text-stone-500">{customer.lastSeenAt.toLocaleString("en-BD")}</td>
+                  <td className="px-3 py-2.5 text-[11px] text-stone-500">{formatDateTime(customer.lastSeenAt)}</td>
                 </tr>
               ))}
             </tbody>

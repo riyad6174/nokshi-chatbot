@@ -17,6 +17,7 @@ import { conversationDigest } from "@/modules/conversations/summary.service";
 import { STATUS_LABELS } from "@/modules/orders/order.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
 import type { ChatMessage, ChatPart } from "@/types/chat";
+import { formatDateTime, formatMessageTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -69,7 +70,9 @@ function Bubble({ message }: { message: ChatMessage }) {
       >
         <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-60">
           {customer ? "Customer" : mine ? message.senderName || "Agent" : "AI assistant"} ·{" "}
-          {new Date(message.createdAt).toLocaleTimeString("en-BD", { hour: "2-digit", minute: "2-digit" })}
+          <time dateTime={new Date(message.createdAt).toISOString()} title={formatDateTime(message.createdAt)}>
+            {formatMessageTime(message.createdAt)}
+          </time>
         </p>
         {message.parts.map((part, index) =>
           part.type === "text" ? (
@@ -310,7 +313,7 @@ export default async function InboxConversationPage({
           </div>
           <div className="rounded-xl border border-stone-200 bg-white p-4 text-stone-600">
             <p>Language: {conversation.session.locale}</p>
-            <p>Started: {conversation.createdAt.toLocaleString("en-BD")}</p>
+            <p>Started: {formatDateTime(conversation.createdAt)}</p>
             <p>Messages: {messages.length}</p>
           </div>
         </aside>

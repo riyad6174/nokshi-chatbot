@@ -13,6 +13,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db/prisma";
 import { listKnowledgeVersions } from "@/modules/knowledge/versions.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDateTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,7 @@ export default async function KnowledgeDetailPage({
         <div>
           <h1 className="font-serif text-2xl text-stone-900">{document.title}</h1>
           <p className="mt-1 text-[11px] text-stone-400">
-            {document.status} · updated {new Date(document.updatedAt).toLocaleString()} · hash{" "}
+            {document.status} · updated {formatDateTime(document.updatedAt)} · hash{" "}
             <span className="font-mono">{document.contentHash.slice(0, 12)}…</span>
           </p>
         </div>
@@ -124,7 +125,7 @@ export default async function KnowledgeDetailPage({
                       </span>
                     </p>
                     <p className="mt-0.5 text-[10px] text-stone-500">
-                      {new Date(version.createdAt).toLocaleString()} · {version.content.length} chars
+                      {formatDateTime(version.createdAt)} · {version.content.length} chars
                       {version.createdBy ? ` · ${version.createdBy}` : ""}
                     </p>
                   </div>

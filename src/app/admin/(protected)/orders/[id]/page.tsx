@@ -7,6 +7,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { formatMinor } from "@/lib/money";
 import { STATUS_LABELS, allowedNextStatuses, getOrderForAdmin } from "@/modules/orders/order.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDateTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ export default async function OrderDetailPage({
         <h1 className="font-mono text-2xl font-semibold text-stone-900">{order.orderNumber}</h1>
         <OrderStatusBadge status={order.status} label={STATUS_LABELS[order.status] ?? order.status} />
       </div>
-      <p className="mt-1 text-[11.5px] text-stone-500">Placed {order.createdAt.toLocaleString("en-BD")}</p>
+      <p className="mt-1 text-[11.5px] text-stone-500">Placed {formatDateTime(order.createdAt)}</p>
 
       <div className="mt-5 grid gap-4 md:grid-cols-[1.4fr_1fr]">
         <section className="rounded-xl border border-stone-200 bg-white p-5">
@@ -148,7 +149,7 @@ export default async function OrderDetailPage({
             <li key={`${event.status}-${index}`}>
               <span className="font-semibold text-stone-800">{STATUS_LABELS[event.status] ?? event.status}</span>{" "}
               <span className="text-stone-400">
-                · {event.at.toLocaleString("en-BD")} · {event.by}
+                · {formatDateTime(event.at)} · {event.by}
               </span>
               {event.note ? <p className="text-stone-600">{event.note}</p> : null}
             </li>

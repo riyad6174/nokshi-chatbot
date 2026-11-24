@@ -6,6 +6,7 @@ import { formatMinor } from "@/lib/money";
 import { getCustomerForAdmin } from "@/modules/customers/admin.service";
 import { STATUS_LABELS } from "@/modules/orders/order.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
+import { formatDate, formatDateTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
       <h1 className="mt-2 font-serif text-2xl text-stone-900">{profile.name || "Anonymous visitor"}</h1>
       <p className="mt-1 text-[12px] text-stone-500">
         {[profile.phone, profile.email].filter(Boolean).join(" · ") || "No contact details yet"} · first seen{" "}
-        {profile.firstSeenAt.toLocaleDateString("en-BD")}
+        {formatDate(profile.firstSeenAt)}
       </p>
 
       <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -51,7 +52,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           <p className="mt-2 text-xl font-semibold text-stone-900">{formatMinor(profile.totalSpentMinor, store.currency)}</p>
           <p className="text-stone-500">
             {profile.orderCount} {profile.orderCount === 1 ? "order" : "orders"}
-            {profile.lastOrderAt ? ` · last ${profile.lastOrderAt.toLocaleDateString("en-BD")}` : ""}
+            {profile.lastOrderAt ? ` · last ${formatDate(profile.lastOrderAt)}` : ""}
           </p>
         </section>
         <section className="rounded-xl border border-stone-200 bg-white p-4 text-[12px]">
@@ -68,7 +69,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                 {consent.granted ? `Opted in: ${consent.channels.join(", ")}` : "Declined"}
               </p>
               <p className="mt-1 text-stone-500">
-                {consent.at.toLocaleString("en-BD")} · via {consent.source}
+                {formatDateTime(consent.at)} · via {consent.source}
               </p>
               <p className="mt-1.5 text-[11px] text-stone-500">Asked: “{consent.wording}”</p>
               {consent.evidence ? <p className="mt-1 text-[11px] text-stone-500">Answered: “{consent.evidence}”</p> : null}
@@ -93,7 +94,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                     {event.productId && productNames.get(event.productId) ? `: ${productNames.get(event.productId)}` : ""}
                     {event.valueMinor ? ` (${formatMinor(event.valueMinor, store.currency)})` : ""}
                   </span>
-                  <span className="shrink-0 text-[10.5px] text-stone-400">{event.at.toLocaleString("en-BD")}</span>
+                  <span className="shrink-0 text-[10.5px] text-stone-400">{formatDateTime(event.at)}</span>
                 </li>
               ))}
             </ol>
@@ -127,7 +128,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                 {conversations.map((conversation) => (
                   <li key={conversation.id}>
                     <Link href={`/admin/inbox/${conversation.id}`} className="text-stone-800 hover:underline">
-                      {conversation.lastMessageAt.toLocaleString("en-BD")}
+                      {formatDateTime(conversation.lastMessageAt)}
                     </Link>
                     <span className="ml-2 text-[10.5px] text-stone-400">{conversation.status}</span>
                   </li>
