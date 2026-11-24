@@ -103,6 +103,14 @@ export const proposeOrderTool: ToolDefinition = {
           deliveryAreas: deliveryAreas(ctx.session.store),
         });
       }
+      // The model sometimes proposes before adding anything. Say exactly what to do, so it adds the
+      // item and proposes again instead of asking the customer to repeat details it already saved.
+      if ((error instanceof CheckoutError && error.code === "cart_empty") || (error instanceof OrderError && error.code === "empty")) {
+        return failure(
+          "cart_empty",
+          "The cart is empty, so there is nothing to order yet. Add the product the customer wants with add_to_cart now (search_products first if you need it), then call propose_order again. Their name, phone and address are already saved: don't ask for them again.",
+        );
+      }
       if (error instanceof OrderError || error instanceof CheckoutError) return failure(error.code, error.message, error.details);
       if (error instanceof UntrustedCheckoutUrlError) return failure("checkout_failed", "The order could not be prepared.");
       throw error;

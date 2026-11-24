@@ -40,7 +40,7 @@ export function comparisonRows(products: ProductCardData[]): Array<{ label: stri
 export const compareProductsTool: ToolDefinition = {
   name: "compare_products",
   description:
-    "Compare 2-4 products side by side using catalog facts only (price, stock, brand, attributes, available options). Pass product ids, or names exactly as shown. Shows a comparison card; then give ONE recommendation with a reason based on the customer's need.",
+    "Use for \"what's the difference\", \"which is better\" or \"X or Y?\" between products. Compare 2-4 products side by side using catalog facts only (price, stock, brand, attributes, available options). Pass product ids, or names exactly as shown. Shows a comparison card; then give ONE recommendation with a reason based on the customer's need.",
   parameters: {
     type: "object",
     additionalProperties: false,
