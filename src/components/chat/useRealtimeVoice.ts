@@ -143,8 +143,9 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
   }, []);
 
   const toListening = useCallback(() => {
+    // Ending: hang up only once the reply (the goodbye) is complete, not when earlier audio stops.
     if (endAfterSpeechRef.current) {
-      stopRef.current();
+      if (!replyRef.current) stopRef.current();
       return;
     }
     if (phaseRef.current === "paused" || phaseRef.current === "off") return;
@@ -202,6 +203,14 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
         setActiveTool((current) => (current === call.name ? null : current));
       }
       send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: call.call_id, output } });
+      // The customer is done: hang up once the goodbye has been spoken (see toListening), or after a
+      // short wait if no goodbye comes.
+      if (call.name === "end_call" && !output.includes('"ok":false')) {
+        endAfterSpeechRef.current = true;
+        window.setTimeout(() => {
+          if (endAfterSpeechRef.current && !speakingRef.current && !replyRef.current) stopRef.current();
+        }, 10_000);
+      }
     },
     [send],
   );

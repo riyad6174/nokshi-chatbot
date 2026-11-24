@@ -324,6 +324,14 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
         response = { result: output };
       }
       send({ toolResponse: { functionResponses: [{ id: call.id, name: call.name, response }] } });
+      // The customer is done: hang up once the goodbye has been spoken (see toListening), or after a
+      // short wait if no goodbye comes.
+      if (call.name === "end_call" && response.ok !== false) {
+        endAfterSpeechRef.current = true;
+        window.setTimeout(() => {
+          if (endAfterSpeechRef.current && !isPlaying() && !replyRef.current) stopRef.current();
+        }, 10_000);
+      }
     },
     [ensureReply, send],
   );

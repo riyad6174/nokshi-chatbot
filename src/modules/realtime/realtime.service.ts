@@ -5,7 +5,7 @@ import { resolveAiConfig } from "@/modules/ai/config";
 import { resolveSalesConfig, type ReplyLanguagePreference } from "@/modules/sales/config";
 import { priceLabel } from "@/lib/money";
 import { buildSystemInstructions, nextOrderStep } from "@/modules/ai/system-instructions";
-import { getProviderTools } from "@/modules/ai/tools";
+import { getLiveCallTools } from "@/modules/ai/tools";
 import { compactToolContent } from "@/modules/ai/tools/helpers";
 import type { ToolExecutionResult } from "@/modules/ai/tools/types";
 import { getCartSummary } from "@/modules/cart/cart.service";
@@ -139,7 +139,8 @@ export function liveCallRules(firstFiller: string): string {
 ${LIVE_CALL_RULES_REST}`;
 }
 
-const LIVE_CALL_RULES_REST = `- Phone numbers: repeat them back digit by digit once, naturally, as part of your reply (don't ask them to confirm it separately).
+const LIVE_CALL_RULES_REST = `- Ending the call: never end it on your own after an order or answer; ask if they need anything else. When they're done ("না, ধন্যবাদ", "আর কিছু লাগবে না", "that's all", "bye") or ask to hang up, call end_call, then say one short warm goodbye. Never call end_call while they still want something.
+- Phone numbers: repeat them back digit by digit once, naturally, as part of your reply (don't ask them to confirm it separately).
 - A tool result with "orderState" is the latest cart, order and next step: it replaces CURRENT CART, OPEN ORDER and the next step above.
 `;
 
@@ -241,7 +242,7 @@ export function openerInstruction(saved: SavedDetails | null, language: ReplyLan
 
 /** Our chat-completions tool schemas in the Realtime API's flat format. */
 export function realtimeTools(enabledFeatures?: string | null) {
-  return getProviderTools(enabledFeatures).map((tool) => ({
+  return getLiveCallTools(enabledFeatures).map((tool) => ({
     type: "function" as const,
     name: tool.function.name,
     description: tool.function.description,

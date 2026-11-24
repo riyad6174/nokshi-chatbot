@@ -19,6 +19,7 @@ import { saveCustomerProfileTool } from "@/modules/ai/tools/save-customer-profil
 import { collectContactDetailsTool } from "@/modules/ai/tools/collect-contact-details";
 import { goToCheckoutTool, openProductPageTool } from "@/modules/ai/tools/navigation";
 import { compareProductsTool } from "@/modules/ai/tools/compare-products";
+import { endCallTool } from "@/modules/ai/tools/end-call";
 import type { ToolContext, ToolDefinition, ToolExecutionResult } from "@/modules/ai/tools/types";
 
 const tools: ToolDefinition[] = [
@@ -43,7 +44,10 @@ const tools: ToolDefinition[] = [
   requestHumanTool,
 ];
 
-const byName = new Map(tools.map((tool) => [tool.name, tool]));
+/** Tools that only make sense on a live voice call (never offered in text chat). */
+const liveCallOnlyTools: ToolDefinition[] = [endCallTool];
+
+const byName = new Map([...tools, ...liveCallOnlyTools].map((tool) => [tool.name, tool]));
 
 // Admin settings can turn a capability off. Tools that don't belong to a toggleable feature (orders,
 // profile, handoff, navigation) stay available so existing behaviour is unchanged.
@@ -110,6 +114,17 @@ export function getProviderTools(enabledFeatures?: string | string[] | null, sta
       parameters: tool.parameters,
     },
   }));
+}
+
+/** The tools of a live voice call: the chat tools plus call controls (end_call). */
+export function getLiveCallTools(enabledFeatures?: string | string[] | null): ProviderTool[] {
+  return [
+    ...getProviderTools(enabledFeatures),
+    ...liveCallOnlyTools.map((tool) => ({
+      type: "function" as const,
+      function: { name: tool.name, description: shortenDescription(tool.description), parameters: tool.parameters },
+    })),
+  ];
 }
 
 export async function executeTool(

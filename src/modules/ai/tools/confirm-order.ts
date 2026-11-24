@@ -34,7 +34,7 @@ export const confirmOrderTool: ToolDefinition = {
         orderNumber: order.orderNumber,
         total: priceLabel(order.totalMinor, order.currency),
         payment: "cash on delivery",
-        note: "Placed. In one short sentence: thank them, give the order number, and say they pay on delivery.",
+        note: `Placed. Thank them, give the order number and say they pay on delivery, then ask if you can help with anything else ("আর কিছু লাগবে?" / "Anything else I can help with?"). Don't say goodbye yet.`,
       });
     } catch (error) {
       if (error instanceof OrderError || error instanceof CheckoutError) return failure(error.code, error.message, error.details);

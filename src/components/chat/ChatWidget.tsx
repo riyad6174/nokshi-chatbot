@@ -45,6 +45,8 @@ const WIDGET_KEY = process.env.NEXT_PUBLIC_WIDGET_KEY || "demo-widget-key";
 //   window.dispatchEvent(new CustomEvent("nokshi:activity", { detail: { type: "add_to_cart", productId } }))
 // (types: product_view, search {query}, compare {productIds}, add_to_cart {productId}, checkout_start).
 const ENGAGEMENT_OFF_KEY = "nokshi:engagement-off";
+/** After an order on a call: end the call if the customer says nothing more for this long. */
+const POST_ORDER_SILENCE_MS = 10_000;
 const ACTIVITY_TYPES = new Set(["product_view", "search", "compare", "add_to_cart", "checkout_start"]);
 type EngagementTriggerName = "search" | "product_view" | "compare" | "add_to_cart" | "cart_idle" | "checkout_start";
 type EngagementResult = { show: boolean; reason: string; message?: ChatMessage; nudge?: string | null; retryAfterSeconds?: number };
@@ -871,7 +873,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         if (body.cart) setCart(body.cart as CartPayload);
         if (voiceSession.active && liveEngine) {
           voiceSession.say({
-            text: `Your order ${body.orderNumber} is placed; you pay on delivery. Thank you!`,
+            text: `Your order ${body.orderNumber} is placed; you pay on delivery. Thank you! Is there anything else I can help you with?`,
             lang: voiceSession.lang,
             audio: null,
             mime: null,
@@ -919,9 +921,23 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     [mode, sendMessage, voiceSession],
   );
 
-  // Once an order is placed, voice mode ends after the confirmation is spoken; the chat stays open
-  // with the success card. Orders already in the history when the chat loads don't count.
+  // Once an order is placed the call carries on: the assistant asks if they need anything else and
+  // ends the call itself when they're done (end_call). If the customer says nothing more for a while,
+  // the call ends politely so the microphone isn't left open. Orders already in the history when the
+  // chat loads don't count.
   const lastPlacedRef = useRef<string | null | undefined>(undefined);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const voiceSessionRef = useRef(voiceSession);
+  voiceSessionRef.current = voiceSession;
+  const postOrderTimerRef = useRef<number | null>(null);
+  /** Set when an order was placed on the call: user turns at that moment (to notice they spoke again). */
+  const postOrderWaitRef = useRef<{ userTurns: number } | null>(null);
+  const clearPostOrderTimer = () => {
+    if (postOrderTimerRef.current) window.clearTimeout(postOrderTimerRef.current);
+    postOrderTimerRef.current = null;
+  };
+  useEffect(() => clearPostOrderTimer, []);
   useEffect(() => {
     const placed = [...messages]
       .reverse()
@@ -939,9 +955,34 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       setCelebration(placed.id);
       void playEarcon("success");
       if (pathname?.startsWith("/checkout")) router.refresh();
-      if (voiceSession.active) voiceSession.finishAfterSpeech();
+      if (voiceSession.active) postOrderWaitRef.current = { userTurns: messages.filter((message) => message.role === "user").length };
     }
   }, [messages, pathname, router, voiceSession]);
+
+  // The silence countdown after an order runs only while the call is listening: it starts when the
+  // assistant has finished asking "anything else?", and stops whenever anyone speaks. Once the
+  // customer says something, the conversation simply carries on (the assistant ends it with end_call).
+  const callActive = voiceSession.active;
+  useEffect(() => {
+    const waiting = postOrderWaitRef.current;
+    if (!waiting) return;
+    const userTurns = messagesRef.current.filter((message) => message.role === "user").length;
+    if (!callActive || userTurns > waiting.userTurns) {
+      postOrderWaitRef.current = null;
+      clearPostOrderTimer();
+      return;
+    }
+    if (callPhase !== "listening") {
+      clearPostOrderTimer();
+      return;
+    }
+    if (postOrderTimerRef.current) return;
+    postOrderTimerRef.current = window.setTimeout(() => {
+      postOrderTimerRef.current = null;
+      postOrderWaitRef.current = null;
+      if (voiceActiveRef.current) voiceSessionRef.current.finishAfterSpeech();
+    }, POST_ORDER_SILENCE_MS);
+  }, [callPhase, callActive, messages]);
 
   const [celebration, setCelebration] = useState<string | null>(null);
   useEffect(() => {

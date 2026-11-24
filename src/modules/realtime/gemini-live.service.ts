@@ -1,6 +1,6 @@
 import { env } from "@/lib/config/env";
 import { logger } from "@/lib/logging/logger";
-import { getProviderTools } from "@/modules/ai/tools";
+import { getLiveCallTools } from "@/modules/ai/tools";
 import { makeUsage, type NormalizedUsage } from "@/modules/ai/usage";
 import type { SessionContext } from "@/modules/conversations/session.service";
 import { savedDetailsForVisitor } from "@/modules/customers/profile.service";
@@ -77,7 +77,7 @@ export function geminiLiveSettings(store: Pick<StoreWithSettings, "settings">) {
 
 /** Our chat-completions tool schemas as Gemini function declarations (full JSON Schema). */
 export function geminiFunctionDeclarations(enabledFeatures?: string | null) {
-  return getProviderTools(enabledFeatures).map((tool) => ({
+  return getLiveCallTools(enabledFeatures).map((tool) => ({
     name: tool.function.name,
     description: tool.function.description,
     parametersJsonSchema: tool.function.parameters,
