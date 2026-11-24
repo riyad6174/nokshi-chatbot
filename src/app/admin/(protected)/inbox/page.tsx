@@ -45,15 +45,18 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
 
   // Always opens on every chat; the red badge and the "Needs human" tab surface the waiting ones.
   const filter = parseInboxFilter(rawFilter);
-  const [waiting, counts] = await Promise.all([
+  // Counts and the requested page at the same time (one database round trip instead of two).
+  const requested = Math.max(1, Number.parseInt(rawPage ?? "1", 10) || 1);
+  const [waiting, counts, firstTry] = await Promise.all([
     prisma.conversation.count({ where: { storeId: store.id, status: "waiting_human" } }),
     countInboxFilters(store.id),
+    listConversations(store.id, filter, PAGE_SIZE, (requested - 1) * PAGE_SIZE),
   ]);
   const total = counts[filter];
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   // A page past the end (e.g. chats were resolved meanwhile) shows the last page instead of nothing.
-  const page = Math.min(Math.max(1, Number.parseInt(rawPage ?? "1", 10) || 1), pageCount);
-  const conversations = await listConversations(store.id, filter, PAGE_SIZE, (page - 1) * PAGE_SIZE);
+  const page = Math.min(requested, pageCount);
+  const conversations = page === requested ? firstTry : await listConversations(store.id, filter, PAGE_SIZE, (page - 1) * PAGE_SIZE);
   const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const to = Math.min(page * PAGE_SIZE, total);
 

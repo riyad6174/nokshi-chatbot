@@ -9,7 +9,8 @@ import { logger } from "@/lib/logging/logger";
 import { aiConnectionFormSchema, voiceSettingsFormSchema } from "@/lib/validation/schemas";
 import { resolveAiStatus, type AiConfig } from "@/modules/ai/config";
 import { getPreset } from "@/modules/ai/presets";
-import { realtimeApiKey } from "@/modules/realtime/realtime.service";
+import { geminiLiveSetup, listGeminiLiveModels, mintGeminiLiveToken } from "@/modules/realtime/gemini-live.service";
+import { geminiLiveApiKey, realtimeApiKey } from "@/modules/realtime/realtime.service";
 import { getPrimaryStore } from "@/modules/stores/store.service";
 
 const PATH = "/admin/ai";
@@ -145,7 +146,15 @@ export async function testAiConnectionAction(
     }
 
     const { listOpenAiCompatibleModels } = await import("@/modules/ai/provider");
-    const models = await listOpenAiCompatibleModels(config);
+    const listed = await listOpenAiCompatibleModels(config);
+    // Gemini lists every model the key can reach, including embedding, image, video, speech and
+    // live-voice models that can't run the chat; show only the ones that can, newest first.
+    const models =
+      preset.id === "gemini"
+        ? listed
+            .filter((id) => /^gemini-/.test(id) && !/embedding|image|imagen|veo|tts|live|native-audio|transcribe|translate|aqa|robotics|computer-use/.test(id))
+            .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+        : listed;
     const latencyMs = Date.now() - started;
     if (models.length > 0 && !models.includes(config.model)) {
       return {
@@ -170,13 +179,17 @@ export async function testAiConnectionAction(
   }
 }
 
-// --- Live voice (OpenAI Realtime) ---------------------------------------------------------------
+// --- Live voice (Gemini Live / OpenAI Realtime) -------------------------------------------------
 
 function parseVoiceForm(formData: FormData) {
   return voiceSettingsFormSchema.safeParse({
-    engine: formData.get("engine") ?? "realtime",
+    engine: formData.get("engine") ?? "gemini",
     model: formData.get("model") ?? "",
     voice: formData.get("voice") ?? "",
+    geminiModel: String(formData.get("geminiModel") ?? "").replace(/^models\//, ""),
+    geminiVoice: formData.get("geminiVoice") ?? "",
+    geminiApiKey: formData.get("geminiApiKey") ?? "",
+    clearGeminiKey: formData.get("clearGeminiKey") === "on",
     speed: formData.get("speed") ?? "1",
     style: formData.get("style") ?? "",
     apiKey: formData.get("apiKey") ?? "",
@@ -197,13 +210,21 @@ export async function saveVoiceSettingsAction(formData: FormData) {
     : data.clearKey
       ? { realtimeApiKeyEncrypted: "", realtimeApiKeyLast4: "" }
       : {};
+  const geminiKeyUpdate = data.geminiApiKey
+    ? { geminiApiKeyEncrypted: encryptSecret(data.geminiApiKey), geminiApiKeyLast4: lastFour(data.geminiApiKey) }
+    : data.clearGeminiKey
+      ? { geminiApiKeyEncrypted: "", geminiApiKeyLast4: "" }
+      : {};
   const fields = {
     voiceEngine: data.engine,
     realtimeModel: data.model,
     realtimeVoice: data.voice,
     realtimeVoiceSpeed: data.speed,
     realtimeVoiceStyle: data.style,
+    geminiLiveModel: data.geminiModel,
+    geminiLiveVoice: data.geminiVoice,
     ...keyUpdate,
+    ...geminiKeyUpdate,
   };
 
   await prisma.chatbotSettings.upsert({
@@ -220,7 +241,7 @@ export async function saveVoiceSettingsAction(formData: FormData) {
     storeId: store.id,
     engine: data.engine,
     model: data.model,
-    keyChanged: Boolean(data.apiKey) || data.clearKey,
+    keyChanged: Boolean(data.apiKey) || data.clearKey || Boolean(data.geminiApiKey) || data.clearGeminiKey,
   });
 
   revalidatePath(PATH);
@@ -236,6 +257,10 @@ export async function testVoiceConnectionAction(
   const parsed = parseVoiceForm(formData);
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Check the voice fields.", models: [] };
   const data = parsed.data;
+  if (data.engine === "gemini") return testGeminiVoice(store, data);
+  if (data.engine === "cascade") {
+    return { ok: true, message: "The classic engine uses the speech settings from the server environment and the AI model above.", models: [] };
+  }
   const withoutSavedVoiceKey = { settings: store.settings ? { ...store.settings, realtimeApiKeyEncrypted: "" } : null };
   const apiKey = data.apiKey || realtimeApiKey(data.clearKey ? withoutSavedVoiceKey : store);
   if (!apiKey) {
@@ -261,6 +286,54 @@ export async function testVoiceConnectionAction(
     if (response.status === 429) return { ok: false, message: "OpenAI is rate-limiting this key, or the account is out of credit.", models: [], latencyMs };
     return { ok: false, message: detail ? `OpenAI said: ${detail}` : `OpenAI returned an error (${response.status}).`, models: [], latencyMs };
   } catch (error) {
+    return { ok: false, message: describeError(error), models: [], latencyMs: Date.now() - started };
+  }
+}
+
+/**
+ * Checks the Gemini key and voice model: lists the live-capable models for the picker, then mints a
+ * token with the chosen model and voice (free; no call is made with it).
+ */
+async function testGeminiVoice(
+  store: Awaited<ReturnType<typeof adminStore>>,
+  data: { geminiModel: string; geminiVoice: string; geminiApiKey: string; clearGeminiKey: boolean },
+): Promise<ConnectionTestResult> {
+  const withoutSavedKey = { settings: store.settings ? { ...store.settings, geminiApiKeyEncrypted: "" } : null };
+  const apiKey = data.geminiApiKey || geminiLiveApiKey(data.clearGeminiKey ? withoutSavedKey : store);
+  if (!apiKey) {
+    return { ok: false, message: "No Gemini key: enter one here, or use Google Gemini as the AI model provider above.", models: [] };
+  }
+  const started = Date.now();
+  try {
+    const models = await listGeminiLiveModels(apiKey).catch((error: unknown) => {
+      const status = (error as { status?: number })?.status;
+      if (status === 400 || status === 401 || status === 403) throw error;
+      return [] as string[];
+    });
+    const setup = geminiLiveSetup({ instructions: "Connection test.", model: data.geminiModel, voice: data.geminiVoice });
+    const result = await mintGeminiLiveToken(apiKey, setup, 10_000);
+    const latencyMs = Date.now() - started;
+    const unknownModel = models.length > 0 && !models.includes(data.geminiModel);
+    if (result.token) {
+      return unknownModel
+        ? { ok: false, message: `The key works, but "${data.geminiModel}" isn't one of this key's live models. Pick one from the list.`, models, latencyMs }
+        : { ok: true, message: `Connected. "${data.geminiModel}" with the "${data.geminiVoice}" voice is ready.`, models, latencyMs };
+    }
+    if (result.status === 401 || result.status === 403 || /api key/i.test(result.error ?? "")) {
+      return { ok: false, message: "Google rejected the Gemini API key.", models, latencyMs };
+    }
+    if (result.status === 429) return { ok: false, message: "Gemini is rate-limiting this key, or the quota is used up.", models, latencyMs };
+    return {
+      ok: false,
+      message: result.error ? `Gemini said: ${result.error}` : `Gemini returned an error (${result.status}).`,
+      models,
+      latencyMs,
+    };
+  } catch (error) {
+    const status = (error as { status?: number })?.status;
+    if (status === 400 || status === 401 || status === 403) {
+      return { ok: false, message: "Google rejected the Gemini API key.", models: [], latencyMs: Date.now() - started };
+    }
     return { ok: false, message: describeError(error), models: [], latencyMs: Date.now() - started };
   }
 }

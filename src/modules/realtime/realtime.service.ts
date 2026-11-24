@@ -2,6 +2,7 @@ import { env } from "@/lib/config/env";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import { logger } from "@/lib/logging/logger";
 import { resolveAiConfig } from "@/modules/ai/config";
+import { resolveSalesConfig, type ReplyLanguagePreference } from "@/modules/sales/config";
 import { priceLabel } from "@/lib/money";
 import { buildSystemInstructions, nextOrderStep } from "@/modules/ai/system-instructions";
 import { getProviderTools } from "@/modules/ai/tools";
@@ -12,7 +13,7 @@ import type { SessionContext } from "@/modules/conversations/session.service";
 import { savedDetailsForVisitor, type SavedDetails } from "@/modules/customers/profile.service";
 import { describeOpenProposal } from "@/modules/orders/voice-order.service";
 import type { StoreWithSettings } from "@/modules/stores/store.service";
-import type { ChatPart } from "@/types/chat";
+import type { ChatPart, VoiceEngine } from "@/types/chat";
 
 // Live voice over the OpenAI Realtime API: one streaming model hears the customer, decides and
 // speaks, over WebRTC straight from the browser. Our server keeps the important parts: it builds
@@ -35,7 +36,8 @@ export class RealtimeError extends Error {
 /** Live voice settings: what's set in Admin → AI model, otherwise the VOICE_ENGINE / REALTIME_* env. */
 export function realtimeSettings(store: Pick<StoreWithSettings, "settings">) {
   const settings = store.settings;
-  const engine = settings?.voiceEngine === "realtime" || settings?.voiceEngine === "cascade" ? settings.voiceEngine : env.VOICE_ENGINE;
+  const saved = settings?.voiceEngine;
+  const engine: VoiceEngine = saved === "gemini" || saved === "realtime" || saved === "cascade" ? saved : env.VOICE_ENGINE;
   const speed = settings?.realtimeVoiceSpeed;
   return {
     engine,
@@ -58,13 +60,48 @@ export function realtimeApiKey(store: Pick<StoreWithSettings, "settings">): stri
   return config.apiKey;
 }
 
-/** Which voice engine this store's widget uses. Realtime needs an OpenAI key; otherwise the cascade. */
-export function voiceEngine(store: Pick<StoreWithSettings, "settings">): "realtime" | "cascade" {
-  return realtimeSettings(store).engine === "realtime" && realtimeApiKey(store) ? "realtime" : "cascade";
+/**
+ * The Gemini key live voice runs on: the voice key from Admin → AI model, otherwise the AI model key
+ * when the store's AI provider is Google Gemini. Null otherwise.
+ */
+export function geminiLiveApiKey(store: Pick<StoreWithSettings, "settings">): string | null {
+  const voiceKey = decryptSecret(store.settings?.geminiApiKeyEncrypted);
+  if (voiceKey) return voiceKey;
+  const config = resolveAiConfig(store.settings);
+  if (!config || !config.apiKey || !config.baseUrl.includes("generativelanguage.googleapis.com")) return null;
+  return config.apiKey;
+}
+
+/**
+ * Which voice engine this store's widget uses: the one chosen in Admin → AI model when its key is
+ * available. Without one, the other live engine if it has a key, and the cascade as the last resort,
+ * so a missing key never leaves customers without voice.
+ */
+export function voiceEngine(store: Pick<StoreWithSettings, "settings">): VoiceEngine {
+  const chosen = realtimeSettings(store).engine;
+  if (chosen === "cascade") return "cascade";
+  const gemini = geminiLiveApiKey(store) !== null;
+  const openai = realtimeApiKey(store) !== null;
+  if (chosen === "gemini" && gemini) return "gemini";
+  if (chosen === "realtime" && openai) return "realtime";
+  if (gemini) return "gemini";
+  if (openai) return "realtime";
+  return "cascade";
+}
+
+/** Whether this store's live-call routes (tool, transcript, usage) should accept requests. */
+export function liveVoiceActive(store: Pick<StoreWithSettings, "settings">): boolean {
+  return voiceEngine(store) !== "cascade";
 }
 
 /** What to say before a tool call that takes a moment. Varied, so it doesn't sound scripted. */
 export const WAIT_FILLERS = ["বুঝেছি, একটু সময় দিবেন", "আচ্ছা একটু সময় চেয়ে নিচ্ছি", "একটু অপেক্ষা করুন", "বুঝেছি, একটু অপেক্ষা করুন"];
+const WAIT_FILLERS_EN = ["One moment, please.", "Just a moment.", "Got it, give me a second.", "Sure, let me check."];
+
+/** The language the store chose in Admin → AI Sales & Engagement ("auto" follows the customer). */
+export function storeLanguage(store: Pick<StoreWithSettings, "settings">): ReplyLanguagePreference {
+  return resolveSalesConfig(store.settings).language;
+}
 
 // The last filler given out per conversation, so the next one is always different. In memory: after
 // a restart (or on another server instance) the next pick is just random.
@@ -75,12 +112,17 @@ const lastFiller = new Map<string, { text: string; at: number }>();
  * it, not the model: told to choose or rotate on its own, a model settles on one phrase and repeats
  * it every time.
  */
-export function pickWaitFiller(conversationId: string | null | undefined, random: () => number = Math.random): string {
+export function pickWaitFiller(
+  conversationId: string | null | undefined,
+  random: () => number = Math.random,
+  language: ReplyLanguagePreference = "auto",
+): string {
   const now = Date.now();
   for (const [key, entry] of lastFiller) if (now - entry.at > 30 * 60_000) lastFiller.delete(key);
   const last = conversationId ? lastFiller.get(conversationId)?.text : undefined;
-  const options = WAIT_FILLERS.filter((text) => text !== last);
-  const text = options[Math.floor(random() * options.length)] ?? WAIT_FILLERS[0]!;
+  const pool = language === "en" ? WAIT_FILLERS_EN : WAIT_FILLERS;
+  const options = pool.filter((text) => text !== last);
+  const text = options[Math.floor(random() * options.length)] ?? pool[0]!;
   if (conversationId) lastFiller.set(conversationId, { text, at: now });
   return text;
 }
@@ -102,6 +144,22 @@ const LIVE_CALL_RULES_REST = `- Phone numbers: repeat them back digit by digit o
 `;
 
 // What makes a voice sound like a person rather than an AI: everyday spoken words, not written ones.
+const SOUND_HUMAN_EN = `SOUND LIKE A REAL PERSON, NOT AN AI:
+- Speak casual, warm, everyday English, like a friendly shop assistant on the phone: contractions ("it's", "you'll"), "Sure!", "Got it", "Nice pick!".
+- Say prices the spoken way: "twelve hundred taka", "four and a half thousand taka".
+- Vary your rhythm: short replies, natural pauses, a smile in your voice. Never read like a script.`;
+
+/** The last words of the call instructions (voice models follow the end of the prompt most closely). */
+function languageReminder(language: ReplyLanguagePreference): string {
+  if (language === "bn") {
+    return "LANGUAGE (most important): speak ONLY Bangla on this call, every single reply, even when the customer uses English words. Speak English only if they explicitly ask you to.";
+  }
+  if (language === "en") {
+    return "LANGUAGE (most important): speak ONLY English on this call, every single reply. Speak Bangla only if the customer explicitly asks you to.";
+  }
+  return "LANGUAGE: start in Bangla. Bangla mixed with English words is Bangla. Switch only when the customer speaks whole sentences in English, and don't switch back and forth.";
+}
+
 const SOUND_HUMAN = `SOUND LIKE A REAL PERSON, NOT AN AI:
 - Speak everyday spoken Bangladeshi Bangla, the way a friendly shop assistant in Dhaka talks on the phone. Never formal or written Bangla.
   Natural: "আচ্ছা, দেখাচ্ছি।" · "এইটা নিবেন?" · "দাম পড়বে বারোশো টাকা।" · "ঠিক আছে, অর্ডার করে দিচ্ছি।" · "নাম্বারটা একটু বলবেন?" · "কোথায় পাঠাবো?"
@@ -160,16 +218,24 @@ export async function realtimeInstructions(context: SessionContext): Promise<str
     replyLanguage: "auto",
     liveCall: true,
   });
-  return `${base}\n\n${liveCallRules(pickWaitFiller(context.conversationId))}\n\n${SOUND_HUMAN}\n\nHOW YOU SOUND: ${realtimeSettings(context.store).style}`;
+  const language = storeLanguage(context.store);
+  return `${base}\n\n${liveCallRules(pickWaitFiller(context.conversationId, Math.random, language))}\n\n${language === "en" ? SOUND_HUMAN_EN : SOUND_HUMAN}\n\nHOW YOU SOUND: ${realtimeSettings(context.store).style}\n\n${languageReminder(language)}`;
 }
 
 /**
  * The first thing said on a call: short, fixed, and with no tools (the client sends it with
  * tool_choice "none"), so the call never opens by showing products nobody asked for.
  */
-export function openerInstruction(saved: SavedDetails | null): string {
+export function openerInstruction(saved: SavedDetails | null, language: ReplyLanguagePreference = "auto"): string {
   const first = saved?.name?.trim().split(/\s+/)[0];
-  const line = first ? `হ্যালো ${first}! বলুন, কিভাবে সাহায্য করতে পারি?` : "হ্যালো! বলুন, আপনাকে কিভাবে সাহায্য করতে পারি?";
+  const line =
+    language === "en"
+      ? first
+        ? `Hi ${first}! How can I help you today?`
+        : "Hi! How can I help you today?"
+      : first
+        ? `হ্যালো ${first}! বলুন, কিভাবে সাহায্য করতে পারি?`
+        : "হ্যালো! বলুন, আপনাকে কিভাবে সাহায্য করতে পারি?";
   return `Say exactly this, warmly, and nothing else: "${line}"`;
 }
 
@@ -252,7 +318,7 @@ export async function createRealtimeSession(context: SessionContext): Promise<Re
           : "Live voice could not start. Please try again.";
     throw new RealtimeError(reason, response.status);
   }
-  return { clientSecret: body.value, expiresAt: body.expires_at ?? 0, model: voice.model, opener: openerInstruction(saved) };
+  return { clientSecret: body.value, expiresAt: body.expires_at ?? 0, model: voice.model, opener: openerInstruction(saved, storeLanguage(context.store)) };
 }
 
 /**

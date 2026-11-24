@@ -5,7 +5,8 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import { resolveAiStatus } from "@/modules/ai/config";
 import { EFFORT_LEVELS, PROVIDER_PRESETS, getPreset } from "@/modules/ai/presets";
-import { realtimeApiKey, realtimeSettings } from "@/modules/realtime/realtime.service";
+import { GEMINI_VOICES, geminiLiveSettings } from "@/modules/realtime/gemini-live.service";
+import { geminiLiveApiKey, realtimeApiKey, realtimeSettings, voiceEngine } from "@/modules/realtime/realtime.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,9 @@ export default async function AdminAiPage({
   const preset = getPreset(status.providerId);
   const live = status.config !== null;
   const voice = realtimeSettings(store);
+  const gemini = geminiLiveSettings(store);
+  const activeEngine = voiceEngine(store);
+  const withoutVoiceKeys = { settings: store.settings ? { ...store.settings, realtimeApiKeyEncrypted: "", geminiApiKeyEncrypted: "" } : null };
 
   return (
     <div className="max-w-3xl">
@@ -87,9 +91,17 @@ export default async function AdminAiPage({
       <section className="mt-5 rounded-xl border border-stone-200 bg-white p-5">
         <h2 className="text-[13px] font-semibold text-stone-900">Live voice</h2>
         <p className="mt-0.5 text-[10.5px] text-stone-400">
-          The voice assistant runs on OpenAI Realtime, separately from the text chat model above. Changes apply to the next call.
+          The voice assistant runs on its own live voice model, separately from the text chat model above. With Google Gemini as
+          the provider above, one Gemini key powers both text and voice. Changes apply to the next call.
         </p>
+        {activeEngine !== voice.engine ? (
+          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+            The chosen engine has no usable API key, so customers currently get the{" "}
+            {activeEngine === "gemini" ? "Gemini Live" : activeEngine === "realtime" ? "OpenAI Realtime" : "classic"} voice. Add the key below to switch.
+          </p>
+        ) : null}
         <VoiceSettingsForm
+          geminiVoices={GEMINI_VOICES}
           initial={{
             engine: voice.engine,
             model: voice.model,
@@ -97,7 +109,11 @@ export default async function AdminAiPage({
             speed: voice.speed,
             style: voice.style,
             keyLast4: decryptSecret(store.settings?.realtimeApiKeyEncrypted) ? store.settings?.realtimeApiKeyLast4 || "" : "",
-            mainKeyUsable: realtimeApiKey({ settings: store.settings ? { ...store.settings, realtimeApiKeyEncrypted: "" } : null }) !== null,
+            mainKeyUsable: realtimeApiKey(withoutVoiceKeys) !== null,
+            geminiModel: gemini.model,
+            geminiVoice: gemini.voice,
+            geminiKeyLast4: decryptSecret(store.settings?.geminiApiKeyEncrypted) ? store.settings?.geminiApiKeyLast4 || "" : "",
+            mainGeminiKeyUsable: geminiLiveApiKey(withoutVoiceKeys) !== null,
           }}
         />
       </section>

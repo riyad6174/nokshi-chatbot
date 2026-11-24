@@ -2,6 +2,7 @@
 
 import { startTransition, useActionState, useRef, useState } from "react";
 import { saveAiConnectionAction, testAiConnectionAction, type ConnectionTestResult } from "@/app/admin/ai-actions";
+import { PickOrType } from "@/components/dashboard/PickOrType";
 import type { ProviderPreset } from "@/modules/ai/presets";
 
 const inputClass =
@@ -27,6 +28,7 @@ export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
   const [provider, setProvider] = useState(initial.provider);
   const [baseUrl, setBaseUrl] = useState(initial.baseUrl);
   const [model, setModel] = useState(initial.model);
+  const [effort, setEffort] = useState(initial.effort);
   const [testResult, testAction, testing] = useActionState<ConnectionTestResult | null, FormData>(
     testAiConnectionAction,
     null,
@@ -34,6 +36,8 @@ export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
 
   const preset = presets.find((entry) => entry.id === provider) ?? presets[presets.length - 1]!;
   const isAnthropic = preset.kind === "anthropic";
+  const isGemini = preset.id === "gemini";
+  const effortEnabled = isAnthropic || isGemini;
 
   const onProviderChange = (nextId: string) => {
     const previous = presets.find((entry) => entry.id === provider);
@@ -43,7 +47,11 @@ export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
     // Replace values the admin hasn't customised; keep anything they typed.
     if (!baseUrl || baseUrl === previous?.baseUrl) setBaseUrl(next.baseUrl);
     // Model names don't carry over between Claude and OpenAI-style APIs, so reset when the kind changes.
-    if (!model || model === previous?.suggestedModel || previous?.kind !== next.kind) setModel(next.suggestedModel);
+    if (!model || model === previous?.suggestedModel || previous?.kind !== next.kind || previous?.id === "gemini" || next.id === "gemini") {
+      setModel(next.suggestedModel);
+    }
+    // Gemini: fastest replies and fewest tokens by default.
+    if (next.id === "gemini" && previous?.id !== "gemini") setEffort("low");
   };
 
   const keyHint =
@@ -127,36 +135,34 @@ export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
         <label htmlFor="ai-model" className={labelClass}>
           Model
         </label>
-        <input
+        <PickOrType
           id="ai-model"
           name="model"
           required
+          mono
           value={model}
-          onChange={(event) => setModel(event.target.value)}
-          list="ai-model-options"
+          onChange={setModel}
+          options={(testResult?.models ?? []).map((id) => ({ id }))}
           placeholder={preset.suggestedModel || "model name"}
-          className={`${inputClass} font-mono`}
-          autoComplete="off"
+          className={inputClass}
         />
-        <datalist id="ai-model-options">
-          {(testResult?.models ?? []).map((id) => (
-            <option key={id} value={id} />
-          ))}
-        </datalist>
         <p className="mt-1 text-[10px] text-stone-400">
-          {testResult?.models.length ? `${testResult.models.length} models loaded. Start typing to pick one.` : "Test the connection to load available models."}
+          {testResult?.models.length
+            ? `${testResult.models.length} chat models loaded. Pick one from the list.`
+            : "Test the connection to load the models your key can use."}
         </p>
       </div>
 
       <div>
         <label htmlFor="ai-effort" className={labelClass}>
-          Effort {isAnthropic ? "" : "(Claude only)"}
+          Effort {effortEnabled ? "" : "(Claude and Gemini only)"}
         </label>
         <select
           id="ai-effort"
           name="effort"
-          defaultValue={initial.effort}
-          disabled={!isAnthropic}
+          value={effort}
+          onChange={(event) => setEffort(event.target.value)}
+          disabled={!effortEnabled}
           className={`${inputClass} disabled:opacity-50`}
         >
           {effortLevels.map((level) => (
@@ -165,8 +171,9 @@ export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
             </option>
           ))}
         </select>
-        {!isAnthropic ? <input type="hidden" name="effort" value={initial.effort} /> : null}
+        {!effortEnabled ? <input type="hidden" name="effort" value={effort} /> : null}
         <p className="mt-1 text-[10px] leading-relaxed text-stone-400">
+          {isGemini ? "Gemini: low = fastest replies, fewest tokens (recommended for shop chat). " : ""}
           Higher effort can mean better answers on hard questions, at more latency and cost.
         </p>
       </div>

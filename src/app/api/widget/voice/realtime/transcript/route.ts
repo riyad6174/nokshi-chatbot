@@ -8,7 +8,7 @@ import { recordTurnOutcome } from "@/modules/conversations/handoff.service";
 import { getSessionContext } from "@/modules/conversations/session.service";
 import { trackEvent } from "@/modules/customers/events.service";
 import { capturePhoneFromSpeech } from "@/modules/customers/profile.service";
-import { takeShownParts } from "@/modules/realtime/realtime.service";
+import { liveVoiceActive, takeShownParts, voiceEngine } from "@/modules/realtime/realtime.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,12 +35,14 @@ export async function POST(request: NextRequest) {
   const context = await getSessionContext(sessionId);
   if (!context) return jsonError(401, "session_expired", "Your chat session expired. Please reload the chat.");
 
+  if (!liveVoiceActive(context.store)) return jsonError(403, "realtime_unavailable", "Live voice isn't available.");
+
   const { role, text, interrupted } = parsed.data;
   if (role === "user") {
     if (!text) return jsonOk({ message: null });
     const message = await appendMessage({ conversationId: context.conversationId, role: "user", content: text });
     await capturePhoneFromSpeech(context, text);
-    await trackEvent({ storeId: context.storeId, sessionId: context.sessionId, visitorId: context.visitorId, type: "voice_turn", meta: { engine: "realtime" } });
+    await trackEvent({ storeId: context.storeId, sessionId: context.sessionId, visitorId: context.visitorId, type: "voice_turn", meta: { engine: voiceEngine(context.store) } });
     return jsonOk({ message: toChatMessage(message) });
   }
 

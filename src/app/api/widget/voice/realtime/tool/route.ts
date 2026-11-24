@@ -13,8 +13,9 @@ import {
   pickWaitFiller,
   realtimeStateNote,
   rememberShownParts,
+  storeLanguage,
   toolOutputForModel,
-  voiceEngine,
+  liveVoiceActive,
 } from "@/modules/realtime/realtime.service";
 
 export const runtime = "nodejs";
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
 
   const context = await getSessionContext(sessionId);
   if (!context) return jsonError(401, "session_expired", "Your chat session expired. Please reload the chat.");
-  if (voiceEngine(context.store) !== "realtime") return jsonError(403, "realtime_unavailable", "Live voice isn't available.");
+  if (!liveVoiceActive(context.store)) return jsonError(403, "realtime_unavailable", "Live voice isn't available.");
 
   // Only these tools read the customer's latest words; skip the lookup for the rest (every call waits on it).
   const latestUser = TOOLS_READING_LATEST_TEXT.has(parsed.data.name)
@@ -74,6 +75,6 @@ export async function POST(request: NextRequest) {
   logger.info("realtime.tool_timing", { tool: parsed.data.name, ok: result.ok, ms: Date.now() - started, refreshed: orderState !== null });
 
   // A different filler for the next pause each time, chosen here (models repeat one phrase if left to pick).
-  const nextFiller = pickWaitFiller(context.conversationId);
+  const nextFiller = pickWaitFiller(context.conversationId, Math.random, storeLanguage(context.store));
   return jsonOk({ output: toolOutputForModel(result, orderState, nextFiller), ui: result.ui ?? [] });
 }

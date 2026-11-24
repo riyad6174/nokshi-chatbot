@@ -18,6 +18,19 @@ const labelClass = "text-[10.5px] font-medium text-stone-500";
 const sectionClass = "mt-5 rounded-xl border border-stone-200 bg-white p-5";
 const hintClass = "mt-0.5 text-[11px] text-stone-500";
 
+/**
+ * Sections turned off for now to keep this page simple. Hidden sections keep their saved values,
+ * except proactive engagement, which is switched off on save so nothing runs that isn't on the page.
+ * Set to true to bring them all back.
+ */
+const SHOW_ADVANCED_SECTIONS = false;
+
+const LANGUAGE_OPTIONS = [
+  { value: "bn", label: "Bangla (বাংলা)", hint: "Always replies and speaks in Bangla, even when customers mix in English words. Switches only if the customer asks for English." },
+  { value: "en", label: "English", hint: "Always replies and speaks in English. Switches only if the customer asks for Bangla." },
+  { value: "auto", label: "Match the customer", hint: "Starts in Bangla and follows the customer's language. Bangla with English words still counts as Bangla." },
+] as const;
+
 const TRIGGER_LABELS: Record<(typeof ENGAGEMENT_TRIGGERS)[number], string> = {
   search: "After a product search",
   product_view: "On a product page",
@@ -83,6 +96,7 @@ export default async function SalesEngagementPage({
         . Every product fact still comes from your catalog.
       </p>
 
+      {SHOW_ADVANCED_SECTIONS ? (
       <section className={sectionClass}>
         <h2 className="text-[13px] font-semibold text-stone-900">Industry preset</h2>
         <p className={hintClass}>
@@ -110,10 +124,32 @@ export default async function SalesEngagementPage({
           </ConfirmSubmitButton>
         </form>
       </section>
+      ) : null}
 
       <form action={saveSalesConfigAction}>
         <input type="hidden" name="industry" value={config.industry} />
         <section className={sectionClass}>
+          <input type="hidden" name="section" value="language" />
+          <h2 className="text-[13px] font-semibold text-stone-900">Language</h2>
+          <p className={hintClass}>The language the assistant replies in, in text chat and on voice calls.</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {LANGUAGE_OPTIONS.map((option) => (
+              <label
+                key={option.value}
+                className="admin-choice flex cursor-pointer items-start gap-2 rounded-lg border border-stone-200 p-3 text-[12px] text-stone-700"
+              >
+                <input type="radio" name="language" value={option.value} defaultChecked={config.language === option.value} className="mt-0.5" />
+                <span>
+                  <span className="admin-choice-title font-semibold text-stone-900">{option.label}</span>
+                  <span className="mt-0.5 block text-[11px] text-stone-500">{option.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className={sectionClass}>
+          <input type="hidden" name="section" value="role" />
           <h2 className="text-[13px] font-semibold text-stone-900">Assistant role</h2>
           <div className="mt-3 grid gap-4">
             <Check name="enabled" label="Use the sales engine" defaultChecked={config.enabled} hint="Off: the assistant uses only the standard sales playbook." />
@@ -146,7 +182,10 @@ export default async function SalesEngagementPage({
           </div>
         </section>
 
+        {SHOW_ADVANCED_SECTIONS ? (
+        <>
         <section className={sectionClass}>
+          <input type="hidden" name="section" value="recommendations" />
           <h2 className="text-[13px] font-semibold text-stone-900">Recommendations</h2>
           <div className="mt-3 grid gap-4 sm:grid-cols-3">
             <div>
@@ -218,6 +257,7 @@ export default async function SalesEngagementPage({
         </section>
 
         <section className={sectionClass}>
+          <input type="hidden" name="section" value="engagement" />
           <h2 className="text-[13px] font-semibold text-stone-900">Proactive engagement</h2>
           <p className={hintClass}>
             The assistant can react to what a shopper does (not only to messages), using real catalog suggestions. It never interrupts
@@ -283,7 +323,11 @@ export default async function SalesEngagementPage({
           </div>
         </section>
 
+        </>
+        ) : null}
+
         <section className={sectionClass}>
+          <input type="hidden" name="section" value="goals" />
           <h2 className="text-[13px] font-semibold text-stone-900">Sales goals &amp; handoff</h2>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <div>
@@ -324,7 +368,9 @@ export default async function SalesEngagementPage({
           </div>
         </section>
 
+        {SHOW_ADVANCED_SECTIONS ? (
         <section className={sectionClass}>
+          <input type="hidden" name="section" value="features" />
           <h2 className="text-[13px] font-semibold text-stone-900">AI features</h2>
           <div className="mt-3 grid gap-2">
             <Check
@@ -341,6 +387,12 @@ export default async function SalesEngagementPage({
             />
           </div>
         </section>
+        ) : (
+          <p className="mt-5 rounded-lg border border-dashed border-stone-300 px-4 py-3 text-[11px] text-stone-500">
+            Turned off for now: industry presets, recommendation rules, proactive engagement (no unprompted messages to shoppers) and AI
+            feature switches. Their saved settings are kept.
+          </p>
+        )}
 
         <div className="mt-5 flex justify-end">
           <button type="submit" className="rounded-lg bg-stone-900 px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-stone-800">
@@ -349,6 +401,7 @@ export default async function SalesEngagementPage({
         </div>
       </form>
 
+      {SHOW_ADVANCED_SECTIONS ? (
       <section className={sectionClass} aria-labelledby="preview-heading">
         <h2 id="preview-heading" className="text-[13px] font-semibold text-stone-900">
           Test recommendations
@@ -394,6 +447,7 @@ export default async function SalesEngagementPage({
           )
         ) : null}
       </section>
+      ) : null}
     </div>
   );
 }

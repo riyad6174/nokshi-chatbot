@@ -93,6 +93,22 @@ function isOpenAiApi(baseUrl: string): boolean {
   }
 }
 
+function isGeminiApi(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname === "generativelanguage.googleapis.com";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Gemini thinking depth from the admin "effort" setting. Thinking can't be turned off on every Gemini
+ * model, so the lowest setting is "low": short thinking, the fastest replies and the fewest tokens.
+ */
+function geminiReasoningEffort(effort: AiConfig["effort"]): "low" | "medium" | "high" {
+  return effort === "low" ? "low" : effort === "medium" ? "medium" : "high";
+}
+
 function combineSignals(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
   if (!signal) return timeout;
@@ -232,7 +248,11 @@ async function fetchWithRetry(url: string, init: RequestInit & { signal: AbortSi
 
 async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGenerator<ProviderStreamEvent> {
   const { config } = input;
+  const gemini = isGeminiApi(config.baseUrl);
   const reasoning = isReasoningModel(config.model);
+  // Gemini: thinking tokens count against max_tokens (a tight cap cuts replies off, or leaves them
+  // empty), and Gemini 3+ models are tuned for their default temperature, so neither is sent.
+  const geminiModern = gemini && /gemini-([3-9]|\d{2})/.test(config.model);
   const response = await fetchWithRetry(`${config.baseUrl}/chat/completions`, {
     method: "POST",
     headers: openAiHeaders(config),
@@ -241,8 +261,9 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
       messages: toOpenAiMessages(input.messages),
       tools: input.tools,
       tool_choice: input.toolChoice ?? "auto",
-      ...(reasoning ? {} : { temperature: input.temperature ?? 0.2 }),
-      ...(!reasoning && input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
+      ...(reasoning || geminiModern ? {} : { temperature: input.temperature ?? 0.2 }),
+      ...(!reasoning && !gemini && input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
+      ...(gemini ? { reasoning_effort: geminiReasoningEffort(config.effort), stream_options: { include_usage: true } } : {}),
       // Reasoning models: shallow reasoning is plenty for shop chat, and the cap (which includes
       // reasoning tokens) stops a runaway reply. Only OpenAI's own API is known to take these.
       ...(reasoning && isOpenAiApi(config.baseUrl) ? { reasoning_effort: "low", max_completion_tokens: 4000 } : {}),
@@ -357,7 +378,8 @@ export async function listOpenAiCompatibleModels(config: Pick<AiConfig, "apiKey"
   if (!response.ok) throw new ProviderError("The provider rejected the request.", response.status);
   const body = (await response.json().catch(() => null)) as { data?: Array<{ id?: unknown }> } | null;
   return (body?.data ?? [])
-    .map((entry) => (typeof entry.id === "string" ? entry.id : null))
+    // Gemini lists ids as "models/gemini-…"; requests take the bare name.
+    .map((entry) => (typeof entry.id === "string" ? entry.id.replace(/^models\//, "") : null))
     .filter((id): id is string => Boolean(id))
     .slice(0, 200);
 }

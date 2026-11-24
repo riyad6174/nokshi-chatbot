@@ -33,9 +33,11 @@ const envSchema = z.object({
   SPEECH_VOICE_BN: blankAsUnset(z.string().default("")),
   // Speaking speed for Azure voices, e.g. "+10%" (a bit faster than normal) or "0%".
   SPEECH_RATE: blankAsUnset(z.string().regex(/^[+-]?\d{1,2}%$/, "SPEECH_RATE looks like +10%").default("+10%")),
-  // Voice engine. realtime: OpenAI Realtime over WebRTC (one streaming model hears, thinks and
-  // speaks; fastest). cascade: speech-to-text -> chat model -> text-to-speech (SPEECH_PROVIDER).
-  VOICE_ENGINE: blankAsUnset(z.enum(["realtime", "cascade"]).default("realtime")),
+  // Voice engine. gemini: Gemini Live (one streaming model hears, thinks and speaks; default).
+  // realtime: OpenAI Realtime over WebRTC. cascade: speech-to-text -> chat model -> text-to-speech.
+  VOICE_ENGINE: blankAsUnset(z.enum(["gemini", "realtime", "cascade"]).default("gemini")),
+  GEMINI_LIVE_MODEL: blankAsUnset(z.string().default("gemini-3.8-live")),
+  GEMINI_LIVE_VOICE: blankAsUnset(z.string().default("Kore")),
   REALTIME_MODEL: blankAsUnset(z.string().default("gpt-realtime-2")),
   REALTIME_VOICE: blankAsUnset(z.string().default("marin")),
   // How the live voice speaks: tone, warmth, pace.
@@ -83,7 +85,9 @@ const data = parsed.data as {
   SPEECH_VOICE_EN: string;
   SPEECH_VOICE_BN: string;
   SPEECH_RATE: string;
-  VOICE_ENGINE: "realtime" | "cascade";
+  VOICE_ENGINE: "gemini" | "realtime" | "cascade";
+  GEMINI_LIVE_MODEL: string;
+  GEMINI_LIVE_VOICE: string;
   REALTIME_MODEL: string;
   REALTIME_VOICE: string;
   REALTIME_VOICE_STYLE: string;

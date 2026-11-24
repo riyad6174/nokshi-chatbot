@@ -4,7 +4,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PendingAttachment } from "@/components/chat/ChatComposer";
 import { ChatPanel, type ChatUiError } from "@/components/chat/ChatPanel";
-import { useRealtimeVoice } from "@/components/chat/useRealtimeVoice";
+import { useGeminiLiveVoice } from "@/components/chat/useGeminiLiveVoice";
+import { useRealtimeVoice, type RealtimeCallbacks } from "@/components/chat/useRealtimeVoice";
 import { useVoiceRecorder } from "@/components/chat/useVoiceRecorder";
 import { AssistantOrb, type OrbState } from "@/components/chat/AssistantOrb";
 import { Confetti } from "@/components/chat/Confetti";
@@ -658,7 +659,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       }),
     );
   }, []);
-  const realtimeVoice = useRealtimeVoice({
+  // Shared by both live engines (OpenAI Realtime and Gemini Live).
+  const liveCallbacks: RealtimeCallbacks = {
     onUserMessage: (message) => setMessages((previous) => mergeMessages(previous, [message])),
     onReplyStart: (replyId) =>
       setMessages((previous) => [
@@ -696,12 +698,16 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       void fetchNewMessages();
     },
     onReplyDiscarded: (replyId) => replaceMessage(`pending-${replyId}`, () => null),
-  });
+  };
+  const realtimeVoice = useRealtimeVoice(liveCallbacks);
+  const geminiVoice = useGeminiLiveVoice(liveCallbacks);
 
   const voiceEngine = session?.settings.voiceAssistant.engine ?? "cascade";
-  const voiceSession = voiceEngine === "realtime" ? realtimeVoice : cascadeVoice;
+  const liveEngine = voiceEngine === "realtime" || voiceEngine === "gemini";
+  const liveVoice = voiceEngine === "gemini" ? geminiVoice : realtimeVoice;
+  const voiceSession = liveEngine ? liveVoice : cascadeVoice;
   // What the assistant is doing during a pause: a live call's tool, or the tool of a text/cascade turn.
-  const workingLabel = toolStatusLabel(voiceEngine === "realtime" && realtimeVoice.active ? realtimeVoice.activeTool : workingTool);
+  const workingLabel = toolStatusLabel(liveEngine && liveVoice.active ? liveVoice.activeTool : workingTool);
   voiceActiveRef.current = voiceSession.active;
   voiceLangRef.current = cascadeVoice.lang;
   setVoiceLangRef.current = cascadeVoice.setLang;
@@ -712,7 +718,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const voiceConfig = session?.settings.voiceAssistant;
   const voiceSpeech: "server" | "browser" | null = !voiceConfig?.enabled
     ? null
-    : voiceConfig.engine === "realtime" && voiceCaps.server
+    : voiceConfig.engine !== "cascade" && voiceCaps.server
       ? "server"
       : voiceConfig.speech === "server" && voiceCaps.server
         ? "server"
@@ -731,6 +737,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     // Inside the click: unlock audio before anything is awaited.
     cascadeVoice.prime();
     realtimeVoice.prime();
+    geminiVoice.prime();
     setView("voice");
     setOpen(true);
     const active = sessionRef.current ?? (await initSession());
@@ -742,11 +749,18 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     }
     const caps = voiceSupport();
     const configured = active.settings.voiceAssistant;
-    const lang: VoiceLang = active.store.supportedLocales.some((locale) => locale.startsWith("bn")) ? "bn" : "en";
-    if (configured.engine === "realtime" && caps.server) {
+    // The language chosen in admin; "auto" starts in Bangla when the store supports it.
+    const preferred = configured.language;
+    const lang: VoiceLang =
+      preferred === "bn" || preferred === "en"
+        ? preferred
+        : active.store.supportedLocales.some((locale) => locale.startsWith("bn"))
+          ? "bn"
+          : "en";
+    if (configured.engine !== "cascade" && caps.server) {
       if (!configured.enabled) return;
       // The assistant opens the call itself (greets and asks the name).
-      await realtimeVoice.start({
+      await (configured.engine === "gemini" ? geminiVoice : realtimeVoice).start({
         lang,
         maxSessionMinutes: configured.maxSessionMinutes,
       });
@@ -783,16 +797,18 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     } catch {
       // The opener is optional; the assistant is already listening.
     }
-  }, [cascadeVoice, initSession, realtimeVoice]);
+  }, [cascadeVoice, geminiVoice, initSession, realtimeVoice]);
 
   // Get a call ready before the tap (the customer reaches for the launcher, or the welcome bubble
   // appears): the chat session loads and a live-call token is fetched, so a tap connects fast.
   const warmUpVoice = useCallback(() => {
     void (async () => {
       const active = sessionRef.current ?? (await initSession());
-      if (active?.settings.voiceAssistant.enabled && active.settings.voiceAssistant.engine === "realtime") realtimeVoice.warmUp();
+      const engine = active?.settings.voiceAssistant.enabled ? active.settings.voiceAssistant.engine : "cascade";
+      if (engine === "realtime") realtimeVoice.warmUp();
+      if (engine === "gemini") geminiVoice.warmUp();
     })();
-  }, [initSession, realtimeVoice]);
+  }, [geminiVoice, initSession, realtimeVoice]);
 
   useEffect(() => {
     const onStartVoice = () => void startVoiceAssistant();
@@ -832,7 +848,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           return merged;
         });
         if (body.cart) setCart(body.cart as CartPayload);
-        if (voiceSession.active && voiceEngine === "realtime") {
+        if (voiceSession.active && liveEngine) {
           voiceSession.say({
             text: `Your order ${body.orderNumber} is placed; you pay on delivery. Thank you!`,
             lang: voiceSession.lang,
@@ -850,7 +866,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         setConfirmingOrder(false);
       }
     },
-    [confirmingOrder, noteLatest, voiceEngine, voiceSession],
+    [confirmingOrder, liveEngine, noteLatest, voiceEngine, voiceSession],
   );
 
   const [welcomeSpeaking, setWelcomeSpeaking] = useState(false);

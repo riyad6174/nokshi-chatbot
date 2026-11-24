@@ -122,6 +122,7 @@ export async function POST(request: NextRequest) {
         speech: speechMode(),
         engine: voiceEngine(context.store),
         maxSessionMinutes: env.VOICE_MAX_SESSION_MINUTES,
+        language: resolveSalesConfig(settings).language,
       },
       attachmentsEnabled: settings?.attachmentsEnabled ?? true,
       theme: parseTheme(settings?.widgetTheme),

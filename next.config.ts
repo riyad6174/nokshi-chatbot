@@ -22,6 +22,10 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "2mb",
     },
+    // Keep pages you just visited in the browser for 30 s, so going back and forth between admin
+    // pages is instant instead of re-loading everything from the database. Any save (server action
+    // with revalidatePath) clears this cache, so edits always show up straight away.
+    staleTimes: { dynamic: 30, static: 180 },
   },
 };
 

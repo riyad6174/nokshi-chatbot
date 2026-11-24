@@ -701,6 +701,28 @@
   background-color: var(--admin-surface);
 }
 
+/* Option cards (radio choices): the chosen one gets the champagne accent, readable on the dark theme. */
+.admin-main .admin-choice {
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.admin-main .admin-choice input {
+  accent-color: var(--admin-gold);
+}
+.admin-main .admin-choice:hover {
+  background-color: rgb(255 255 255 / 0.04);
+}
+.admin-main .admin-choice:has(input:checked) {
+  border-color: var(--admin-gold);
+  background-color: var(--admin-gold-soft);
+}
+.admin-main .admin-choice:has(input:checked) .admin-choice-title {
+  color: var(--admin-gold-bright);
+}
+.admin-main .admin-choice:has(input:focus-visible) {
+  outline: 2px solid var(--admin-gold);
+  outline-offset: 2px;
+}
+
 .admin-main .bg-stone-50,
 .admin-main .bg-stone-50\/60 {
   background-color: rgb(255 255 255 / 0.035);

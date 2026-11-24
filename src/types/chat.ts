@@ -153,6 +153,8 @@ export type SuggestedTopic = { label: string; prompt: string };
 
 export type ConversationMode = "bot" | "waiting_human" | "human" | "closed";
 
+export type VoiceEngine = "gemini" | "realtime" | "cascade";
+
 export type WidgetSettingsPayload = {
   assistantName: string;
   welcomeMessage: string;
@@ -160,8 +162,9 @@ export type WidgetSettingsPayload = {
   suggestedTopics: SuggestedTopic[];
   voiceEnabled: boolean;
   /** Hands-free voice assistant. speech "server": cloud STT/TTS; "browser": the browser's own recognition and voices. */
-  /** engine "realtime": OpenAI Realtime over WebRTC; "cascade": speech-to-text, chat model, text-to-speech. */
-  voiceAssistant: { enabled: boolean; speech: "server" | "browser"; engine: "realtime" | "cascade"; maxSessionMinutes: number };
+  /** engine "gemini": Gemini Live over WebSocket; "realtime": OpenAI Realtime over WebRTC; "cascade": speech-to-text, chat model, text-to-speech. */
+  /** language: the language chosen in Admin → AI Sales & Engagement ("auto": follow the customer). */
+  voiceAssistant: { enabled: boolean; speech: "server" | "browser"; engine: VoiceEngine; maxSessionMinutes: number; language?: "bn" | "en" | "auto" };
   attachmentsEnabled: boolean;
   theme: { accent?: string; position?: "left" | "right" };
   aiMode: "live" | "demo";

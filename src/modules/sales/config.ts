@@ -25,6 +25,10 @@ export type RelationshipKind = (typeof RELATIONSHIP_KINDS)[number];
 export const ENGAGEMENT_TRIGGERS = ["search", "product_view", "compare", "add_to_cart", "cart_idle", "checkout_start"] as const;
 export type EngagementTrigger = (typeof ENGAGEMENT_TRIGGERS)[number];
 
+/** The language the assistant speaks. "auto": the customer's language (Bangla mixed with English words counts as Bangla). */
+export const REPLY_LANGUAGES = ["bn", "en", "auto"] as const;
+export type ReplyLanguagePreference = (typeof REPLY_LANGUAGES)[number];
+
 export const STRATEGIES = ["balanced", "complementary_first", "budget_first", "premium_first", "similar_first"] as const;
 
 const text = (max: number) => z.string().trim().max(max);
@@ -65,6 +69,8 @@ export const salesConfigSchema = z.object({
   /** Off: the assistant behaves exactly as before (base rules + the generic sales playbook). */
   enabled: z.boolean().default(true),
   industry: z.enum(INDUSTRIES).default("general"),
+  /** Which language the assistant replies and speaks in (text chat and voice). */
+  language: z.enum(REPLY_LANGUAGES).default("auto"),
   businessType: text(120).default(""),
   persona: z
     .object({

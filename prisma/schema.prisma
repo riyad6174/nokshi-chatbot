@@ -72,6 +72,12 @@ model ChatbotSettings {
   // A separate OpenAI key for voice; blank uses the AI model key above when it's an OpenAI key.
   realtimeApiKeyEncrypted String?
   realtimeApiKeyLast4     String?
+  // Gemini Live voice (engine "gemini"). Blank model/voice use GEMINI_LIVE_* env; blank key uses the
+  // AI model key above when the AI model provider is Google Gemini.
+  geminiLiveModel         String?
+  geminiLiveVoice         String?
+  geminiApiKeyEncrypted   String?
+  geminiApiKeyLast4       String?
   assistantName      String   @default("Shopping assistant")
   // friendly | professional | playful | luxury | custom
   tone               String   @default("friendly")

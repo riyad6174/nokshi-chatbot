@@ -55,12 +55,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   },
   {
     id: "gemini",
-    label: "Google Gemini (OpenAI-compatible endpoint)",
+    label: "Google Gemini",
     kind: "openai-compatible",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-    suggestedModel: "",
+    suggestedModel: "gemini-3.8-flash",
     keyRequired: true,
     keyHelpUrl: "https://aistudio.google.com/apikey",
+    note: "The same Gemini key also powers live voice (Gemini Live) below. Effort \"low\" gives the fastest replies and uses the fewest tokens; test the connection to load the models your key can use.",
   },
   {
     id: "ollama",

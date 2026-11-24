@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   // Independent lookups, at once (requireAdmin still redirects a logged-out visitor).
   const [user, store] = await Promise.all([requireAdmin(), getAdminPageStore()]);
-  const waiting = store ? await countConversationsNeedingAttention(store.id) : 0;
+  // Not awaited: the page renders straight away and the badge fills in when the count arrives.
+  const waiting = store ? countConversationsNeedingAttention(store.id).catch(() => 0) : 0;
 
   return (
     <AdminShell user={{ email: user.email, name: user.name }} storeName={store?.name ?? null} waiting={waiting}>

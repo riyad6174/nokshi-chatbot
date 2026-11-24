@@ -157,9 +157,15 @@ export const chatbotSettingsFormSchema = z.object({
 });
 
 export const voiceSettingsFormSchema = z.object({
-  engine: z.enum(["realtime", "cascade"]),
+  engine: z.enum(["gemini", "realtime", "cascade"]),
+  // OpenAI Realtime model and voice.
   model: z.string().trim().min(1, "Choose a voice model").max(100),
   voice: z.string().trim().min(1, "Choose a voice").max(50),
+  // Gemini Live model, voice and key.
+  geminiModel: z.string().trim().min(1, "Choose a Gemini voice model").max(100),
+  geminiVoice: z.string().trim().min(1, "Choose a Gemini voice").max(50),
+  geminiApiKey: z.string().trim().max(500),
+  clearGeminiKey: z.boolean(),
   speed: z.coerce.number().min(0.75, "Speed is between 0.75 and 1.4").max(1.4, "Speed is between 0.75 and 1.4"),
   style: z.string().trim().max(500),
   apiKey: z.string().trim().max(500),

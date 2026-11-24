@@ -64,7 +64,7 @@ describe("voice assistant API", () => {
   it("advertises the voice assistant in the session payload", async () => {
     const { body } = await openSession();
     // No OpenAI key in tests: live voice falls back to the cascade engine.
-    expect(body.settings.voiceAssistant).toEqual({ enabled: true, speech: "browser", engine: "cascade", maxSessionMinutes: 15 });
+    expect(body.settings.voiceAssistant).toEqual({ enabled: true, speech: "browser", engine: "cascade", maxSessionMinutes: 15, language: "auto" });
   });
 
   it("answers a spoken turn with the normal reply plus speakable sentences", async () => {

@@ -90,15 +90,26 @@ function IconButton({
 export function AdminShell({
   user,
   storeName,
-  waiting,
+  waiting: waitingCount,
   children,
 }: {
   user: { email: string; name: string | null };
   storeName: string | null;
-  waiting: number;
+  /** Chats waiting for a person. A promise, so pages render without waiting for this count. */
+  waiting: Promise<number> | number;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const [waiting, setWaiting] = useState(typeof waitingCount === "number" ? waitingCount : 0);
+  useEffect(() => {
+    let live = true;
+    Promise.resolve(waitingCount)
+      .then((count) => live && setWaiting(count))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [waitingCount]);
   const [rail, setRail] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
