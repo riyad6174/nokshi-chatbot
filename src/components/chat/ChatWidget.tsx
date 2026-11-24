@@ -9,7 +9,8 @@ import { useRealtimeVoice, type RealtimeCallbacks } from "@/components/chat/useR
 import { useVoiceRecorder } from "@/components/chat/useVoiceRecorder";
 import { AssistantOrb, type OrbState } from "@/components/chat/AssistantOrb";
 import { Confetti } from "@/components/chat/Confetti";
-import { FloatingActions, hasSlot, pickLatestActions } from "@/components/chat/FloatingActions";
+import { FloatingActions, hasSlot, opensCardStage, pickLatestActions } from "@/components/chat/FloatingActions";
+import { ProductDetailsLinkContext } from "@/components/chat/ProductCard";
 import { VoiceControlCard } from "@/components/chat/VoiceControlCard";
 import { VoiceDock } from "@/components/chat/VoiceDock";
 import { CardStage } from "@/components/chat/CardStage";
@@ -33,6 +34,7 @@ import type {
   ChatPart,
   ConversationMode,
   CustomerDetailsData,
+  ProductCardData,
   WidgetSessionResponse,
 } from "@/types/chat";
 
@@ -119,6 +121,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const pathname = usePathname();
   /** Product and order cards in the middle of the screen (voice view); hidden on demand. */
   const [cardsOpen, setCardsOpen] = useState(false);
+  /** A product page (or checkout) was just opened for the customer: the voice panel shrinks to a slim bar. */
+  const [pageView, setPageView] = useState(false);
   useVisualViewportVars(open);
 
   // The assistant can take the customer to a page (a product, checkout). The widget lives in the
@@ -126,6 +130,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const navigateTo = useCallback(
     (url: string) => {
       setCardsOpen(false);
+      setPageView(true);
       router.push(url);
     },
     [router],
@@ -1003,11 +1008,16 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       return;
     }
     if (cardsKey && cardsKey !== seenCardsRef.current) {
-      setCardsOpen(true);
+      // Cards from a reply that opened a page stay one tap away instead of covering that page.
+      if (opensCardStage(latestCards)) {
+        setCardsOpen(true);
+        setPageView(false);
+      }
       void playEarcon("card");
       if (!openRef.current) setUnread((count) => count + 1);
     }
     seenCardsRef.current = cardsKey;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- latestCards changes with cardsKey
   }, [cardsKey, session]);
   const cardsLabel = (() => {
     const first = latestCards?.parts[0]?.part.type;
@@ -1026,8 +1036,28 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const shortScreen = useMediaQuery("(max-height: 520px)");
   const fullScreenChat = useMediaQuery("(max-width: 639px), (max-height: 520px)");
   const cardsShown = cardsOpen && Boolean(latestCards);
-  const compactDock = voiceView && !stageWide && (cardsShown || shortScreen);
+  const compactDock = voiceView && (pageView || (!stageWide && (cardsShown || shortScreen)));
   const chatFillsScreen = open && !voiceView && fullScreenChat;
+
+  // The slim bar is for the call on a page; a new call starts with the full panel.
+  useEffect(() => {
+    if (!voiceSession.active) setPageView(false);
+  }, [voiceSession.active]);
+
+  // "View full details" on a card: open the product's page; on a live call, tell the assistant
+  // which page the customer is now on, so "this one" means that product.
+  const openProductDetails = useCallback(
+    (product: ProductCardData) => {
+      navigateTo(`/products/${product.slug}`);
+      if (chatFillsScreen) setOpen(false);
+      if (liveEngine && liveVoice.active) {
+        liveVoice.notePage(
+          `(System) The customer opened the page of "${product.name}" (productId ${product.id}) themselves. "This one" now means this product.`,
+        );
+      }
+    },
+    [chatFillsScreen, liveEngine, liveVoice, navigateTo],
+  );
 
   const uploadFile = useCallback(async (file: Blob, name: string): Promise<{ uploadId: string } | { error: string }> => {
     const form = new FormData();
@@ -1391,7 +1421,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   );
 
   return (
-    <>
+    <ProductDetailsLinkContext.Provider value={openProductDetails}>
       <WelcomeBubble
         widgetKey={WIDGET_KEY}
         suppressed={open || voiceSession.active || Boolean(nudge)}
@@ -1417,6 +1447,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       {voiceView ? (
         <VoiceDock
           compact={compactDock}
+          onExpand={pageView ? () => setPageView(false) : undefined}
           position={position}
           assistantName={session?.settings.assistantName ?? "Shopping assistant"}
           accent={accent}
@@ -1626,6 +1657,6 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           </span>
         ) : null}
       </button>
-    </>
+    </ProductDetailsLinkContext.Provider>
   );
 }

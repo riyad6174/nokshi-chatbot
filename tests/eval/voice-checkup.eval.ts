@@ -108,7 +108,7 @@ async function speak(text: string, voice = "Puck"): Promise<Int16Array> {
 
 // --- a live call ---------------------------------------------------------------------------------
 
-type ToolLog = { name: string; args: Record<string, unknown>; ok: boolean; shown: string[]; uiTypes: string[]; ms: number };
+type ToolLog = { name: string; args: Record<string, unknown>; ok: boolean; shown: string[]; uiTypes: string[]; url?: string; ms: number };
 type TurnLog = {
   input: string;
   mode: "text" | "audio";
@@ -241,7 +241,7 @@ class Call {
                 this.cookie,
               ),
             );
-            const body = (await response.json()) as { output?: string; ui?: Array<{ type: string; products?: Array<{ name: string }> }> };
+            const body = (await response.json()) as { output?: string; ui?: Array<{ type: string; url?: string; products?: Array<{ name: string }> }> };
             const output = body.output ?? JSON.stringify({ ok: false, error: { code: "route_failed" } });
             const shown = (body.ui ?? []).flatMap((part) => (part.type === "product_list" ? (part.products ?? []).map((product) => product.name) : []));
             let parsed: Record<string, unknown>;
@@ -251,7 +251,7 @@ class Call {
             } catch {
               parsed = { result: output };
             }
-            log.tools.push({ name: call.name, args: call.args ?? {}, ok: parsed.ok !== false, shown, uiTypes: (body.ui ?? []).map((part) => part.type), ms: Math.round(performance.now() - started) });
+            log.tools.push({ name: call.name, args: call.args ?? {}, ok: parsed.ok !== false, shown, uiTypes: (body.ui ?? []).map((part) => part.type), url: body.ui?.find((part) => part.type === "navigate")?.url, ms: Math.round(performance.now() - started) });
             if (shown.length) log.shown = shown;
             this.send({ toolResponse: { functionResponses: [{ id: call.id, name: call.name, response: parsed }] } });
             pending -= 1;
@@ -462,6 +462,25 @@ describe.skipIf(!SOURCE_URL || !GEMINI_KEY)("Gemini Live voice checkup", () => {
       const turn = await say(call, turns, "ব্যাকপ্যাকের পেজটা খুলুন");
       const opened = turn.tools.find((tool) => tool.name === "open_product_page");
       record("Open product page", "opens the backpack page", Boolean(opened?.uiTypes.includes("navigate")), `${toolNames(turn).join(", ") || "no tool"} ${JSON.stringify(opened?.args ?? {})}`);
+    });
+
+    const slugOf = new Map(products.map((product) => [product.name, product.slug]));
+    const navigatedTo = (turn: TurnLog) => turn.tools.find((tool) => tool.url)?.url ?? null;
+
+    await scenario("Details, then the page", async (call, turns) => {
+      const details = await say(call, turns, "ব্যাকপ্যাকের details বলেন");
+      record("Details, then the page", "details: shows the card, doesn't jump to the page", details.shown.includes("Urban Trek Backpack") && !navigatedTo(details), `${toolNames(details).join(", ") || "no tool"} · ${short(details.reply)}`);
+      record("Details, then the page", "offers to open the page", /পেজ|page/i.test(details.reply), short(details.reply));
+      const page = await say(call, turns, "হ্যাঁ, পেজটা খুলে দিন");
+      record("Details, then the page", "opens the backpack page", navigatedTo(page) === `/products/${slugOf.get("Urban Trek Backpack")}`, `${toolNames(page).join(", ") || "no tool"} → ${navigatedTo(page) ?? "no page"}`);
+      record("Details, then the page", "no card pops over the page", page.shown.length === 0, page.shown.length ? `cards: ${page.shown.join(", ")}` : "");
+    });
+
+    await scenario("Open a page by number", async (call, turns) => {
+      const browse = await say(call, turns, "সব প্রোডাক্ট দেখান");
+      const second = browse.shown[1];
+      const page = await say(call, turns, "২ নম্বরটার পেজ খুলুন");
+      record("Open a page by number", "opens the 2nd product's page", Boolean(second) && navigatedTo(page) === `/products/${slugOf.get(second!)}`, `2nd shown: ${second ?? "none"} → ${navigatedTo(page) ?? "no page"} (${JSON.stringify(page.tools.find((tool) => tool.name === "open_product_page")?.args ?? {})})`);
     });
 
     await scenario("Full order", async (call, turns) => {

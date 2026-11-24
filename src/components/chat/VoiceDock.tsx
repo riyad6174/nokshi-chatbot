@@ -100,6 +100,7 @@ export function VoiceDock({
   onOpenChat,
   onClose,
   compact = false,
+  onExpand,
   workingLabel = null,
   position = "right",
 }: {
@@ -109,6 +110,8 @@ export function VoiceDock({
   workingLabel?: string | null;
   /** A slim bar along the bottom of the screen, so cards (or a short screen) get the room. */
   compact?: boolean;
+  /** Back to the full panel (shown on the slim bar while a page the assistant opened is in view). */
+  onExpand?: () => void;
   assistantName: string;
   accent: string;
   phase: VoicePhase;
@@ -228,6 +231,19 @@ export function VoiceDock({
               </svg>
             </RoundButton>
           )}
+          {onExpand ? (
+            <button
+              type="button"
+              onClick={onExpand}
+              aria-label="Expand the voice panel"
+              title="Expand"
+              className="flex h-9 w-7 shrink-0 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="m6 15 6-6 6 6" />
+              </svg>
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onClose}

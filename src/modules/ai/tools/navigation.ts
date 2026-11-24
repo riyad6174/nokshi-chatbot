@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { isObjectId } from "@/lib/db/ids";
-import { failure, productIdByName, success } from "@/modules/ai/tools/helpers";
+import { failure, focusedProductId, productIdAtPosition, productsMatchingName, success } from "@/modules/ai/tools/helpers";
+import { resolveSalesConfig } from "@/modules/sales/config";
 import type { ToolDefinition } from "@/modules/ai/tools/types";
 import { CheckoutError, prepareCheckoutForSession, saveCheckoutCustomer } from "@/modules/commerce/checkout.service";
 import { UntrustedCheckoutUrlError } from "@/modules/commerce/checkout-url";
@@ -23,35 +24,65 @@ function sitePath(url: string): string {
 const productSchema = z.object({
   product: z.string().trim().min(1).max(200).optional(),
   productId: z.string().trim().max(100).optional(),
+  position: z.number().int().min(1).max(50).optional(),
 });
 
 export const openProductPageTool: ToolDefinition = {
   name: "open_product_page",
   description:
-    "Open a product's page for the customer (full photos and details). Use when they want to see more of a product or ask to open it. Pass the product name as shown, or its productId.",
+    "Open a product's own page (full photos and details) when the customer asks to open, see or go to its page (\"পেজটা খুলুন\", \"take me there\"). Pass the name as on the card, the productId, or its number on screen; with none, the product being talked about is opened. Not for \"tell me about it\" (that's get_product_details).",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {
       product: { type: "string", description: 'Product name as shown, e.g. "Urban Trek Backpack".' },
       productId: { type: "string" },
+      position: { type: "integer", minimum: 1, description: "Its number among the products on screen (1 = first)." },
     },
   },
   schema: productSchema,
   async execute(ctx, args) {
     const input = productSchema.parse(args);
+    const storeId = ctx.session.storeId;
     let productId = input.productId && isObjectId(input.productId) ? input.productId : null;
-    if (!productId && input.product) productId = await productIdByName(ctx.session.storeId, input.product);
+    if (!productId && input.position) productId = await productIdAtPosition(ctx.session.conversationId, input.position);
+    if (!productId && input.product) {
+      const matches = await productsMatchingName(storeId, input.product, resolveSalesConfig(ctx.session.store.settings).synonyms);
+      if (matches.length === 1) productId = matches[0]!.id;
+      else if (matches.length > 1) {
+        // "the bag" with several bags: the one being talked about, if it's one of them.
+        const focused = await focusedProductId(ctx.session.conversationId, storeId);
+        if (focused && matches.some((match) => match.id === focused)) productId = focused;
+        else {
+          return failure(
+            "ambiguous_product",
+            `Several products match: ${matches.slice(0, 6).map((match) => match.name).join(", ")}. Ask which one they want to open (by name or number).`,
+          );
+        }
+      }
+    }
+    // No name, id or number: the product being talked about.
+    if (!productId && !input.product && !input.position) productId = await focusedProductId(ctx.session.conversationId, storeId);
     const product = productId
       ? await prisma.product.findFirst({
-          where: { id: productId, storeId: ctx.session.storeId, status: "active" },
+          where: { id: productId, storeId, status: "active" },
           select: { name: true, slug: true },
         })
       : null;
-    if (!product) return failure("product_not_found", "No single product matched. Ask which product they mean, by name.");
-    return success({ opened: true, product: product.name, note: 'The page is opening. Say one short line, e.g. "Here it is."' }, [
-      { type: "navigate", url: `/products/${product.slug}`, label: product.name },
-    ]);
+    if (!product) {
+      return failure(
+        "product_not_found",
+        "No product matched. Ask which product they mean (by name or its number on screen), or search_products first and open the one they pick.",
+      );
+    }
+    return success(
+      {
+        opened: true,
+        product: product.name,
+        note: `The page is opening and the card overlay is closed. Say one short line ("পেজটা খুলে দিলাম" / "Here's its page"). Don't call other product tools for it.`,
+      },
+      [{ type: "navigate", url: `/products/${product.slug}`, label: product.name }],
+    );
   },
 };
 

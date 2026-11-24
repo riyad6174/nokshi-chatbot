@@ -1,7 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
+import { useProductContext } from "@/components/chat/ChatProductContext";
 import { formatMoney } from "@/lib/client/format";
 import type { ProductCardData, ProductVariantData } from "@/types/chat";
 
@@ -24,6 +25,32 @@ type ProductCardProps = {
 };
 
 const MAX_CHIPS = 4;
+
+/**
+ * Opens a product's own page from its card ("View full details"). Provided by the chat widget, so
+ * cards anywhere in it get the link without passing a handler through every list; without a
+ * provider the link isn't shown.
+ */
+export const ProductDetailsLinkContext = createContext<((product: ProductCardData) => void) | null>(null);
+
+/** "View full details": hidden when there's no handler or the customer is already on that page. */
+function DetailsLink({ product, className = "" }: { product: ProductCardData; className?: string }) {
+  const open = useContext(ProductDetailsLinkContext);
+  const currentProductId = useProductContext();
+  if (!open || !product.slug || currentProductId === product.id) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => open(product)}
+      className={`inline-flex items-center gap-1 self-start text-[11.5px] font-semibold text-stone-600 underline-offset-2 transition hover:text-stone-900 hover:underline ${className}`}
+    >
+      View full details
+      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
+        <path d="M5 12h14M13 6l6 6-6 6" />
+      </svg>
+    </button>
+  );
+}
 
 /** Versions as tappable chips (colour, size…); sold-out ones are shown but can't be picked. */
 function VariantChips({
@@ -160,6 +187,7 @@ export function ProductCard({ product, accent, busy, index = 0, layout = "row", 
             <p className="line-clamp-2 text-[13px] font-semibold leading-snug text-stone-900 touch:text-[14px]" title={product.name}>
               {product.name}
             </p>
+            <DetailsLink product={product} className="mt-0.5 text-[11px]" />
           </div>
           <VariantChips variants={product.variants} selectedId={selectedVariantId} accent={accent} onSelect={setSelectedVariantId} compact />
           <div className="mt-auto flex items-center justify-between gap-2 pt-0.5">
@@ -211,6 +239,7 @@ export function ProductCard({ product, accent, busy, index = 0, layout = "row", 
             {formatMoney(priceMinor, product.currency)}
           </p>
           <VariantChips variants={product.variants} selectedId={selectedVariantId} accent={accent} onSelect={setSelectedVariantId} compact />
+          <DetailsLink product={product} className="text-[11px]" />
           <div className="mt-auto pt-1">
             <AddButton canAdd={canAdd} busy={busy} accent={accent} label="Add" onClick={add} />
           </div>
@@ -233,6 +262,7 @@ export function ProductCard({ product, accent, busy, index = 0, layout = "row", 
           <p className="mt-0.5 text-[16px] font-semibold leading-snug text-stone-900">{product.name}</p>
         </div>
         <p className="line-clamp-3 text-[12px] leading-relaxed text-stone-500">{product.description}</p>
+        <DetailsLink product={product} />
         <VariantChips variants={product.variants} selectedId={selectedVariantId} accent={accent} onSelect={setSelectedVariantId} />
         <div className="mt-auto flex items-center gap-3 pt-1">
           <p className="shrink-0 text-[18px] font-bold tracking-tight" style={{ color: accent }}>

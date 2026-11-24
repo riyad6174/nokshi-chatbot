@@ -128,6 +128,14 @@ export function pickLatestActions(messages: ChatMessage[]) {
   return null;
 }
 
+/**
+ * Whether new cards should open the centre stage. Not for a reply that also opened a page: the
+ * customer asked for that page, so it stays visible (the cards remain one tap away).
+ */
+export function opensCardStage(latest: ReturnType<typeof pickLatestActions>): boolean {
+  return Boolean(latest) && !latest!.message.parts.some((part) => part.type === "navigate");
+}
+
 export function FloatingActions({
   slot,
   messages,

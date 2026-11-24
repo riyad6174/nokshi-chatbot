@@ -635,6 +635,14 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
     [send],
   );
 
+  /** Tells the model something about the page (e.g. the customer opened a product page), without a reply. */
+  const notePage = useCallback(
+    (text: string) => {
+      send({ type: "conversation.item.create", item: { type: "message", role: "system", content: [{ type: "input_text", text }] } });
+    },
+    [send],
+  );
+
   /** Let the current reply finish, then end the call (e.g. after an order is placed). */
   const finishAfterSpeech = useCallback(() => {
     endAfterSpeechRef.current = true;
@@ -664,6 +672,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
     say,
     submitText,
     setLang,
+    notePage,
     clearError: () => setError(null),
   };
 }

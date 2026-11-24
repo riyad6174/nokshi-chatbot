@@ -68,7 +68,7 @@ ${languageRule(language)}
    c) Place: when their next message agrees in any way ("yes", "ok", "confirm", "sure", "হ্যাঁ", "জি", "ঠিক আছে", "করে দিন"), call confirm_order immediately with no arguments.
    - Customers who prefer to pay online: prepare_checkout sends them to the checkout page instead.
    - Never say an order is placed unless confirm_order succeeded or an order event says so.
-6b. Pages: open_product_page when they want to see a product in full; go_to_checkout when they want to pay online or ask for checkout (it fills in the details you know). On the checkout page they can still order cash on delivery by voice with propose_order / confirm_order.
+6b. Pages: open_product_page when they ask to open or go to a product's page (not for "tell me about it": that's get_product_details); go_to_checkout when they want to pay online or ask for checkout (it fills in the details you know). On the checkout page they can still order cash on delivery by voice with propose_order / confirm_order.
 7. Order status: call get_order_status. For orders not placed in this chat, you need both the order number and the phone number. Never reveal an order otherwise.
 8. ${
     voice
@@ -131,7 +131,8 @@ const VOICE_RULES = `VOICE MODE (your reply is spoken aloud; the customer talks 
 THE CUSTOMER CONTROLS EVERYTHING BY VOICE. You do every action yourself with your tools, right away:
 - NEVER tell the customer to click, tap, press or use any button, form or page ("Add to cart বাটনে চাপ দিন" is forbidden). If they want something done, call the tool and do it.
 - Never answer about products without searching first. "কি কি প্রোডাক্ট আছে?" / "what do you have?" -> search_products with NO query, then say how many there are and ask which one they like.
-- "এটার details বলেন" / "tell me about it" / "দেখি" -> get_product_details AND open_product_page for that product, then say one or two key points (price, what it is).
+- Details: "এটার details বলেন" / "tell me about it" / "দেখি" -> get_product_details for that product (its card appears), say one or two key points (price, what it is), then offer the full page: "পুরো পেজটা খুলে দিবো?" / "Want me to open its page?". Don't open the page yet.
+- Page: "পেজটা খুলুন" / "পেজে নিয়ে যান" / "details page এ নিয়ে যান" / "open it" / "take me there", or yes to your offer -> open_product_page ONLY, for the product being talked about (by name, productId, or its number on screen). Don't also call get_product_details or search_products for it.
 - "এটা কার্টে দেন" / "add this" / "এইটা নিব" / "অর্ডার করব এটা" -> add_to_cart for the product being talked about (the one just shown, opened or described). If several are on screen and it's unclear which, ask "কোনটা, নাম্বার বলবেন?".`;
 
 function customerOnFile(saved: SavedDetails | null | undefined): string {

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db/prisma";
 import { priceLabel } from "@/lib/money";
 import { CartError, getActiveCart, getCartSummary } from "@/modules/cart/cart.service";
 import { loadActiveCatalog } from "@/modules/catalog/product.service";
+import { translateShoppingTerms } from "@/modules/catalog/query-terms";
 import type { CartPayload, ChatPart, ProductCardData } from "@/types/chat";
 import type { ToolContext, ToolExecutionResult } from "@/modules/ai/tools/types";
 
@@ -106,6 +107,65 @@ export async function productIdByName(storeId: string, name: string): Promise<st
   if (exact) return exact.id;
   const partial = products.filter((product) => product.name.toLowerCase().includes(wanted) || wanted.includes(product.name.toLowerCase()));
   return partial.length === 1 ? partial[0]!.id : null;
+}
+
+/**
+ * Active products a spoken or typed name refers to: an exact name first, then names containing it
+ * (or contained in it), then Bangla/colloquial words translated to catalog terms ("ব্যাকপ্যাক" ->
+ * backpack) matched against names and categories. Several results mean the name is ambiguous.
+ */
+type CatalogProduct = Awaited<ReturnType<typeof loadActiveCatalog>>[number];
+
+export async function productsMatchingName(storeId: string, name: string, synonyms: Record<string, string[]> = {}): Promise<CatalogProduct[]> {
+  const products = await loadActiveCatalog(storeId);
+  const wanted = name.trim().toLowerCase();
+  if (!wanted) return [];
+  const exact = products.filter((product) => product.name.toLowerCase() === wanted);
+  if (exact.length) return exact;
+  const partial = products.filter((product) => product.name.toLowerCase().includes(wanted) || wanted.includes(product.name.toLowerCase()));
+  if (partial.length) return partial;
+  const terms = translateShoppingTerms(name, synonyms).toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  const byName = products.filter((product) => terms.some((term) => product.name.toLowerCase().includes(term)));
+  if (byName.length) return byName;
+  return products.filter((product) => terms.some((term) => product.category.toLowerCase().includes(term)));
+}
+
+/** Parts saved with the recent assistant/event messages of a conversation, newest message first. */
+async function recentParts(conversationId: string): Promise<ChatPart[][]> {
+  const rows = await prisma.message.findMany({
+    where: { conversationId, role: { in: ["assistant", "event"] } },
+    orderBy: { createdAt: "desc" },
+    take: 12,
+    select: { structuredContent: true },
+  });
+  return rows.flatMap((row) => {
+    if (!row.structuredContent) return [];
+    try {
+      const parts = JSON.parse(row.structuredContent) as unknown;
+      return Array.isArray(parts) ? [parts as ChatPart[]] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * The product being talked about: the latest single-product card (details) or product page opened
+ * in this conversation, so "open its page" / "this one" works without the model repeating a name.
+ */
+export async function focusedProductId(conversationId: string, storeId: string): Promise<string | null> {
+  for (const parts of await recentParts(conversationId)) {
+    for (const part of [...parts].reverse()) {
+      if (part.type === "product_list" && part.products.length === 1) return part.products[0]!.id;
+      if (part.type === "navigate" && part.url.startsWith("/products/")) {
+        const slug = decodeURIComponent(part.url.slice("/products/".length).split(/[?#]/)[0] ?? "");
+        const product = (await loadActiveCatalog(storeId)).find((entry) => entry.slug === slug);
+        if (product) return product.id;
+      }
+    }
+  }
+  return null;
 }
 
 /**

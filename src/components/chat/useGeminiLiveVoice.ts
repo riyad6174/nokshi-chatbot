@@ -725,6 +725,14 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
     [send],
   );
 
+  /** Tells the model something about the page (e.g. the customer opened a product page), without a reply. */
+  const notePage = useCallback(
+    (text: string) => {
+      send({ clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: false } });
+    },
+    [send],
+  );
+
   const finishAfterSpeech = useCallback(() => {
     endAfterSpeechRef.current = true;
     window.setTimeout(() => {
@@ -761,6 +769,7 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
     say,
     submitText,
     setLang,
+    notePage,
     clearError: () => setError(null),
   };
 }
