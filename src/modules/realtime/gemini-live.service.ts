@@ -12,6 +12,7 @@ import {
   realtimeSettings,
   storeLanguage,
 } from "@/modules/realtime/realtime.service";
+import type { ReplyLanguagePreference } from "@/modules/sales/config";
 import type { StoreWithSettings } from "@/modules/stores/store.service";
 
 // Live voice over the Gemini Live API: one streaming model hears the customer, decides and speaks,
@@ -93,7 +94,20 @@ const GEMINI_CALL_RULES = `TOOLS ON A CALL (most important):
 - Adding, changing or ordering: call the tool first, then speak about the result. Never say something was added or ordered unless the tool said ok.
 - If you didn't clearly hear what they said, ask them once to repeat it; don't guess a product.`;
 
-type SetupInput = { instructions: string; enabledFeatures?: string | null; model: string; voice: string; resumeHandle?: string };
+type SetupInput = {
+  instructions: string;
+  enabledFeatures?: string | null;
+  model: string;
+  voice: string;
+  resumeHandle?: string;
+  /** The store's language (Admin → AI Sales & Engagement): which languages to expect when transcribing. */
+  language?: ReplyLanguagePreference;
+};
+
+/** Languages the customer speaks, for transcription. Without a hint, noise came back as Spanish, French or Hindi. */
+function transcriptionLanguages(language: ReplyLanguagePreference = "auto"): string[] {
+  return language === "en" ? ["en-US", "bn-BD"] : ["bn-BD", "en-US"];
+}
 
 /** The BidiGenerateContentSetup for a call: audio out, transcripts both ways, our tools and VAD tuning. */
 export function geminiLiveSetup(input: SetupInput) {
@@ -107,17 +121,18 @@ export function geminiLiveSetup(input: SetupInput) {
     tools: [{ functionDeclarations: geminiFunctionDeclarations(input.enabledFeatures) }],
     realtimeInputConfig: {
       automaticActivityDetection: {
-        // Picks up soft speech quickly (the browser's noise suppression keeps background noise down)...
-        startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
-        // ...but doesn't end the customer's turn on a short thinking pause in the middle of a sentence.
+        // A turn starts only on sustained speech: with high sensitivity, clicks, background noise and
+        // the assistant's own echo started turns that cut replies off, which then started over.
+        startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
+        // Doesn't end the customer's turn on a short thinking pause in the middle of a sentence.
         endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
-        prefixPaddingMs: 120,
+        prefixPaddingMs: 300,
         silenceDurationMs: 650,
       },
       activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
     },
     // Transcripts are what the chat, the inbox and the AI's memory show.
-    inputAudioTranscription: {},
+    inputAudioTranscription: { languageCodes: transcriptionLanguages(input.language) },
     outputAudioTranscription: {},
     // Every reply is billed on the whole call so far: past this size the oldest part is dropped in
     // one block (so the cached prefix keeps matching), keeping long calls cheap.
@@ -188,6 +203,7 @@ export async function createGeminiLiveSession(context: SessionContext, resumeHan
     model: live.model,
     voice: live.voice,
     resumeHandle,
+    language: storeLanguage(context.store),
   });
   const result = await mintGeminiLiveToken(apiKey, setup);
   if (!result.token) {

@@ -5,7 +5,12 @@ import { requestHandoff, wantsHuman } from "@/modules/conversations/handoff.serv
 
 // What a customer says when they really want a person, in English and Bangla.
 const ASKS_FOR_PERSON =
-  /(human|person|agent|staff|someone real|real person|representative|customer (care|service)|support team|talk to (someone|a person))|মানুষ|এজেন্ট|স্টাফ|কাস্টমার কেয়ার|কাস্টমার সার্ভিস|কারো সাথে কথা|কর্মী|প্রতিনিধি/i;
+  /\b(human|person|agent|staff|someone real|real person|representative|customer (care|service)|support|team|manager|talk to (someone|a person))|মানুষ|এজেন্ট|স্টাফ|কাস্টমার কেয়ার|কাস্টমার সার্ভিস|কারো সাথে কথা|কর্মী|প্রতিনিধি|টিম|সাপোর্ট|ম্যানেজার/i;
+
+/** The assistant offered a person ("টিমের সাথে কথা বলাবো?"), so a plain "yes" asks for one. */
+export const OFFERS_PERSON = ASKS_FOR_PERSON;
+/** A plain yes in Bangla or English ("হ্যাঁ, বলো।", "জি", "ok, do it"). */
+export const AFFIRMATIVE = /^(\s*(হ্যাঁ|হ্যা|জি|জ্বি|আচ্ছা|ঠিক আছে|অবশ্যই|করো|করেন|দাও|দিন|বলো|yes|yeah|yep|ok|okay|sure|please|do it)[\s,।.!]*)+$/i;
 
 /** On a voice call the AI hands off only when the customer asked for a person themselves. */
 function customerAskedForPerson(text: string, keywordsJson: string | null | undefined): boolean {
@@ -37,7 +42,12 @@ export const requestHumanTool: ToolDefinition = {
     }
     // A live voice call stays with the assistant (a handoff moves the customer to text chat), unless
     // they asked for a person. Complaints and refunds still reach the team through the inbox.
-    if (ctx.channel === "voice" && !customerAskedForPerson(ctx.latestUserText ?? "", ctx.session.store.settings?.handoffKeywords)) {
+    // Their recent words (a stray noise line after "connect me" doesn't hide the request), or a yes to
+    // the assistant's own offer of a person.
+    const asked =
+      (ctx.recentUserTexts ?? [ctx.latestUserText ?? ""]).some((text) => customerAskedForPerson(text, ctx.session.store.settings?.handoffKeywords)) ||
+      ctx.acceptedPersonOffer === true;
+    if (ctx.channel === "voice" && !asked) {
       return failure(
         "not_requested",
         "Don't hand off: the customer didn't ask for a person. Keep helping by voice. If you can't find something, say so in one sentence and offer what the store has.",

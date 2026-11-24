@@ -20,6 +20,8 @@ export async function recordAiTurn(input: {
   toolLog?: ToolLogEntry[];
   userText?: string;
   intent?: string;
+  /** Why the turn failed (outcome "error"). */
+  errorReason?: string;
   usage?: NormalizedUsage;
   costMicros?: number;
   pricingStatus?: "priced" | "unpriced" | "mixed";
@@ -51,6 +53,7 @@ export async function recordAiTurn(input: {
         pricingStatus: input.pricingStatus,
         usageEventCount: input.usageEventCount,
         outcome: input.outcome,
+        ...(input.errorReason ? { errorReason: input.errorReason.slice(0, 500) } : {}),
         latencyMs: Math.max(0, Math.round(input.latencyMs)),
         firstTokenMs: input.firstTokenMs == null ? null : Math.max(0, Math.round(input.firstTokenMs)),
         toolCalls,

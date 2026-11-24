@@ -542,6 +542,15 @@ describe.skipIf(!SOURCE_URL || !GEMINI_KEY)("Gemini Live voice checkup", () => {
       record("Spoken: English sandals", "shows Leather Sandals", turn.shown.includes("Leather Sandals"), `shown: ${turn.shown.join(", ") || "none"}`);
       record("Spoken: English sandals", "replies in English", turn.reply.length > 0 && !BANGLA.test(turn.reply), short(turn.reply));
     });
+    await scenario("Background noise", async (call, turns) => {
+      await speakTurn(call, turns, "ব্যাগ দেখান");
+      // Two seconds of low-level hiss (a fan, street noise): not the customer.
+      const noise = new Int16Array(16_000 * 2).map(() => Math.round((Math.random() - 0.5) * 2 * 900));
+      const turn = await call.turn({ audio: noise, label: "(2 s of background noise)" });
+      turns.push(turn);
+      record("Background noise", "doesn't treat noise as the customer", turn.reply.trim() === "" && turn.tools.length === 0, `heard: "${turn.heard.trim()}" · reply: ${short(turn.reply) || "none"}`);
+    });
+
     await scenario("Spoken: phone number", async (call, turns) => {
       const turn = await speakTurn(call, turns, "আমার ফোন নাম্বার শূন্য এক সাত এক দুই তিন চার পাঁচ ছয় সাত আট");
       const digits = (turn.heard + " " + turn.reply).replace(/[০-৯]/g, (d) => String("০১২৩৪৫৬৭৮৯".indexOf(d)));

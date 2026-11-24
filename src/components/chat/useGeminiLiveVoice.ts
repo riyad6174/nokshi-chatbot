@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeCallbacks } from "@/components/chat/useRealtimeVoice";
 import type { SpokenSentence, VoiceLang, VoicePhase } from "@/components/chat/useVoiceSession";
-import { hasSpeechText, isLikelyEcho } from "@/modules/speech/echo";
+import { hasSpeechText, isLikelyEcho, isNoiseTranscript } from "@/modules/speech/echo";
 import type { ChatMessage, ChatPart } from "@/types/chat";
 
 // Live voice over the Gemini Live API (WebSocket). One streaming model hears the customer, decides
@@ -37,11 +37,19 @@ const GRANT_USABLE_MS = 8 * 60_000;
 const INPUT_RATE = 16_000;
 const OUTPUT_RATE = 24_000;
 /**
- * While the assistant is audible, only clearly louder sound (the customer talking over it) is sent.
- * The browser's echo cancellation removes most of the assistant's own voice; this stops the rest
- * from interrupting the reply on laptops and phones on speaker.
+ * While the assistant is audible, the microphone is held back until the customer clearly talks over
+ * it: this loud, for this many 40 ms chunks in a row. The browser's echo cancellation removes most of
+ * the assistant's own voice, but on laptop and phone speakers the rest (and background noise) kept
+ * interrupting replies, which then started over: the "same sentence again and again" complaint.
  */
-const BARGE_IN_RMS = 0.035;
+const BARGE_IN_RMS = 0.05;
+const BARGE_IN_CHUNKS = 3;
+/** Audio kept while held back, sent first when a real barge-in starts (so its first syllables count). */
+const BARGE_IN_LOOKBACK_CHUNKS = 8;
+/** Quiet chunks after which a barge-in that turned out to be noise closes again. */
+const BARGE_IN_RELEASE_CHUNKS = 12;
+/** A typed line on a call can come back from Gemini as if it was heard; it's ignored for this long. */
+const TYPED_ECHO_MS = 15_000;
 /** Customer words are saved this long after the last transcript fragment (fragments arrive in bursts). */
 const USER_FLUSH_MS = 350;
 
@@ -99,6 +107,12 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   const data = (await response.json().catch(() => null)) as (T & { error?: { message?: string } }) | null;
   if (!response.ok || !data) throw new Error(data?.error?.message || "The request failed.");
   return data;
+}
+
+/** Same words, ignoring case, punctuation and spacing (a typed line vs. its transcript). */
+function sameWords(left: string, right: string): boolean {
+  const norm = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  return norm(left) === norm(right);
 }
 
 function toBase64(buffer: ArrayBuffer): string {
@@ -167,6 +181,10 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
   const sessionTimerRef = useRef<number | null>(null);
   const endAfterSpeechRef = useRef(false);
   const levelTickRef = useRef(0);
+  /** The barge-in gate while the assistant speaks (see BARGE_IN_RMS). */
+  const gateRef = useRef<{ open: boolean; loud: number; quiet: number; held: ArrayBuffer[] }>({ open: false, loud: 0, quiet: 0, held: [] });
+  /** The latest typed line on this call, to drop it when Gemini sends it back as a transcript. */
+  const typedRef = useRef<{ text: string; at: number } | null>(null);
 
   const setPhase = useCallback((next: VoicePhase) => {
     phaseRef.current = next;
@@ -190,7 +208,7 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
 
   const isPlaying = () => {
     const ctx = audioCtxRef.current;
-    return Boolean(ctx && playbackRef.current.sources.size > 0 && ctx.currentTime < playbackRef.current.nextTime + 0.25);
+    return Boolean(ctx && playbackRef.current.sources.size > 0 && ctx.currentTime < playbackRef.current.nextTime + 0.4);
   };
 
   const toListening = useCallback(() => {
@@ -259,7 +277,15 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
     const text = userTextRef.current.trim();
     userTextRef.current = "";
     if (!hasSpeechText(text)) return;
+    // Noise or echo transcribed as stray words ("¿Qué", "de", "A"): not the customer, never saved.
+    if (isNoiseTranscript(text)) return;
     if (isLikelyEcho(text, `${lastSaidRef.current} ${replyRef.current?.text ?? ""}`)) return;
+    // A line the customer typed on the call, sent back by Gemini as if it was heard: already saved.
+    const typed = typedRef.current;
+    if (typed && performance.now() - typed.at < TYPED_ECHO_MS && sameWords(typed.text, text)) {
+      typedRef.current = null;
+      return;
+    }
     pendingUserRef.current = postJson<{ message: ChatMessage | null }>("/api/widget/voice/realtime/transcript", { role: "user", text })
       .then((saved) => saved.message && callbacksRef.current.onUserMessage(saved.message))
       .catch(() => undefined);
@@ -537,8 +563,36 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
           setLevel(Math.min(1, rms * 10));
         }
         if (!readyRef.current || phaseRef.current === "paused" || phaseRef.current === "off") return;
-        if (isPlaying() && rms < BARGE_IN_RMS) return;
-        send({ realtimeInput: { audio: { data: toBase64(pcm), mimeType: `audio/pcm;rate=${INPUT_RATE}` } } });
+        const sendChunk = (chunk: ArrayBuffer) =>
+          send({ realtimeInput: { audio: { data: toBase64(chunk), mimeType: `audio/pcm;rate=${INPUT_RATE}` } } });
+        const gate = gateRef.current;
+        if (!isPlaying()) {
+          gate.open = false;
+          gate.loud = 0;
+          gate.quiet = 0;
+          gate.held = [];
+          sendChunk(pcm);
+          return;
+        }
+        // The assistant is audible: hold the microphone back until the customer clearly talks over it.
+        if (!gate.open) {
+          gate.held.push(pcm);
+          if (gate.held.length > BARGE_IN_LOOKBACK_CHUNKS) gate.held.shift();
+          gate.loud = rms >= BARGE_IN_RMS ? gate.loud + 1 : 0;
+          if (gate.loud < BARGE_IN_CHUNKS) return;
+          gate.open = true;
+          gate.quiet = 0;
+          for (const chunk of gate.held) sendChunk(chunk);
+          gate.held = [];
+          return;
+        }
+        // Talking over the assistant: send everything, until it goes quiet again (it was noise).
+        gate.quiet = rms < BARGE_IN_RMS ? gate.quiet + 1 : 0;
+        if (gate.quiet >= BARGE_IN_RELEASE_CHUNKS) {
+          gate.open = false;
+          gate.loud = 0;
+        }
+        sendChunk(pcm);
       };
       captureRef.current = { source, node, sink };
     },
@@ -715,6 +769,7 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
         .then((saved) => saved.message && callbacksRef.current.onUserMessage(saved.message))
         .catch(() => undefined);
       userStartedAtRef.current = performance.now();
+      typedRef.current = { text, at: performance.now() };
       send({ clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: true } });
     },
     [send],

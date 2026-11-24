@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SpokenSentence, VoiceLang, VoicePhase } from "@/components/chat/useVoiceSession";
-import { hasSpeechText, isLikelyEcho } from "@/modules/speech/echo";
+import { hasSpeechText, isLikelyEcho, isNoiseTranscript } from "@/modules/speech/echo";
 import type { ChatMessage, ChatPart } from "@/types/chat";
 
 // Live voice over the OpenAI Realtime API (WebRTC). One streaming model hears the customer, decides
@@ -246,7 +246,8 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
           // come back empty too, and the model hears the audio itself. So the reply always goes
           // ahead; only if it made no tool call is the noise removed from the call afterwards, so
           // it isn't billed again with every later reply.
-          if (!hasSpeechText(text)) {
+          // Noise or echo transcribed as stray words ("¿Qué", "de") is handled like an empty transcript.
+          if (!hasSpeechText(text) || isNoiseTranscript(text)) {
             if (answersThis && itemId) reply!.noiseItemId = itemId;
             break;
           }

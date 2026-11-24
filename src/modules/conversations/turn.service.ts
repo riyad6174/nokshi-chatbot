@@ -296,6 +296,7 @@ async function runTurn(input: TurnInput): Promise<void> {
       await recordAiTurn({
         ...turnLog,
         outcome: "error",
+        errorReason: error instanceof Error ? error.message : String(error),
         latencyMs: Date.now() - turnLog.started,
         ...usageLogFields(),
       });

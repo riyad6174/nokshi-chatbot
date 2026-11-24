@@ -6,6 +6,11 @@ export type ProviderToolCall = {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /**
+   * Provider data to send back unchanged with this call. Gemini 3 puts its thought signature here
+   * (extra_content.google.thought_signature) and rejects the next request without it.
+   */
+  extra_content?: unknown;
 };
 
 /** Parts of a customer message beyond text: attached images and PDFs (base64). */
@@ -51,6 +56,19 @@ export type ProviderStreamEvent =
       model?: string;
       providerRequestId?: string;
     };
+
+/** The provider's own error message from a JSON error body (for logs and the turn log), short. */
+function providerErrorDetail(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    const first = Array.isArray(parsed) ? parsed[0] : parsed;
+    const message = (first as { error?: { message?: unknown } } | null)?.error?.message;
+    if (typeof message === "string" && message.trim()) return message.trim().slice(0, 300);
+  } catch {
+    // Not JSON.
+  }
+  return body.trim().slice(0, 300) || "no details";
+}
 
 export class ProviderError extends Error {
   status?: number;
@@ -151,7 +169,7 @@ async function* readSse(response: Response): AsyncGenerator<string> {
   }
 }
 
-type AccumulatedToolCall = { id?: string; name: string; arguments: string; index: number };
+type AccumulatedToolCall = { id?: string; name: string; arguments: string; index: number; extra?: unknown };
 
 function openAiHeaders(config: Pick<AiConfig, "apiKey">): Record<string, string> {
   return {
@@ -253,7 +271,8 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
   // Gemini: thinking tokens count against max_tokens (a tight cap cuts replies off, or leaves them
   // empty), and Gemini 3+ models are tuned for their default temperature, so neither is sent.
   const geminiModern = gemini && /gemini-([3-9]|\d{2})/.test(config.model);
-  const response = await fetchWithRetry(`${config.baseUrl}/chat/completions`, {
+  const request = (minimal: boolean) =>
+    fetchWithRetry(`${config.baseUrl}/chat/completions`, {
     method: "POST",
     headers: openAiHeaders(config),
     body: JSON.stringify({
@@ -263,7 +282,7 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
       tool_choice: input.toolChoice ?? "auto",
       ...(reasoning || geminiModern ? {} : { temperature: input.temperature ?? 0.2 }),
       ...(!reasoning && !gemini && input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
-      ...(gemini ? { reasoning_effort: geminiReasoningEffort(config.effort), stream_options: { include_usage: true } } : {}),
+      ...(gemini && !minimal ? { reasoning_effort: geminiReasoningEffort(config.effort), stream_options: { include_usage: true } } : {}),
       // Reasoning models: shallow reasoning is plenty for shop chat, and the cap (which includes
       // reasoning tokens) stops a runaway reply. Only OpenAI's own API is known to take these.
       ...(reasoning && isOpenAiApi(config.baseUrl) ? { reasoning_effort: "low", max_completion_tokens: 4000 } : {}),
@@ -277,10 +296,19 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
     signal: combineSignals(input.signal, 45_000),
   });
 
+  let response = await request(false);
+  // Gemini rejecting a request outright: try once more without the optional Gemini-only fields
+  // (thinking level, usage reporting), which some models or API versions don't accept.
+  if (!response.ok && response.status === 400 && gemini) {
+    const body = await response.text().catch(() => "");
+    logger.warn("ai.provider_retry_minimal", { status: response.status, body: body.slice(0, 500) });
+    response = await request(true);
+  }
+
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     logger.error("ai.provider_error", { status: response.status, body: body.slice(0, 500) });
-    throw new ProviderError("The AI provider could not be reached.", response.status);
+    throw new ProviderError(`The AI provider returned ${response.status}: ${providerErrorDetail(body)}`, response.status);
   }
 
   const providerRequestId = response.headers.get("x-request-id") ?? undefined;
@@ -325,6 +353,7 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
         if (call.id) existing.id = call.id;
         if (call.function?.name) existing.name += call.function.name;
         if (call.function?.arguments) existing.arguments += call.function.arguments;
+        if (call.extra_content) existing.extra = call.extra_content;
         toolCalls.set(index, existing);
       }
     }
@@ -339,6 +368,7 @@ async function* streamOpenAiCompatible(input: StreamCompletionInput): AsyncGener
       id: call.id || `call_${call.index}_${position}`,
       type: "function",
       function: { name: call.name, arguments: call.arguments || "{}" },
+      ...(call.extra !== undefined ? { extra_content: call.extra } : {}),
     }));
 
   yield {

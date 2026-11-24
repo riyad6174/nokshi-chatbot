@@ -40,7 +40,10 @@ describe("Gemini Live setup", () => {
     expect(setup.generationConfig.responseModalities).toEqual(["AUDIO"]);
     expect(setup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe("Kore");
     expect(setup.systemInstruction.parts[0]!.text).toBe("Be nice.");
-    expect(setup.inputAudioTranscription).toEqual({});
+    expect(setup.inputAudioTranscription).toEqual({ languageCodes: ["bn-BD", "en-US"] });
+    // A turn needs sustained speech: clicks, noise and echo kept starting turns that cut replies off.
+    expect(setup.realtimeInputConfig.automaticActivityDetection.startOfSpeechSensitivity).toBe("START_SENSITIVITY_LOW");
+    expect(geminiLiveSetup({ instructions: "x", model: "m", voice: "v", language: "en" }).inputAudioTranscription.languageCodes[0]).toBe("en-US");
     expect(setup.sessionResumption).toEqual({ handle: "h1" });
     const names = setup.tools[0]!.functionDeclarations.map((tool) => tool.name);
     expect(names).toContain("search_products");
@@ -74,6 +77,50 @@ describe("Gemini usage", () => {
 });
 
 describe("Gemini text requests", () => {
+  it("sends Gemini's thought signature back with its tool call", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const signature = { google: { thought_signature: "sig-123" } };
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      const chunk = { choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "search_products", arguments: "{}" }, extra_content: signature }] }, finish_reason: "tool_calls" }] };
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { status: 200 });
+    });
+    const config = { providerId: "gemini", kind: "openai-compatible" as const, baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "k", model: "gemini-3.8-flash", effort: "low" as const };
+    let done: { toolCalls: Array<{ extra_content?: unknown }> } | null = null;
+    for await (const event of streamCompletion({ config, messages: [{ role: "user", content: "bags" }], tools: [] })) {
+      if (event.type === "done") done = event;
+    }
+    expect(done!.toolCalls[0]!.extra_content).toEqual(signature);
+    // The next round replays the call with its signature.
+    for await (const _event of streamCompletion({
+      config,
+      messages: [
+        { role: "user", content: "bags" },
+        { role: "assistant", content: null, tool_calls: done!.toolCalls as never },
+        { role: "tool", content: "{}", tool_call_id: "c1", name: "search_products" },
+      ],
+      tools: [],
+    })) void _event;
+    const replayed = (bodies[1]!.messages as Array<{ tool_calls?: Array<{ extra_content?: unknown }> }>)[1]!;
+    expect(replayed.tool_calls![0]!.extra_content).toEqual(signature);
+  });
+
+  it("retries a rejected Gemini request once without the optional fields, and reports the reason", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify([{ error: { message: "Invalid JSON payload: unknown name reasoning_effort" } }]), { status: 400 });
+    });
+    const config = { providerId: "gemini", kind: "openai-compatible" as const, baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "k", model: "gemini-3.8-flash", effort: "low" as const };
+    const run = async () => {
+      for await (const _event of streamCompletion({ config, messages: [{ role: "user", content: "hi" }], tools: [] })) void _event;
+    };
+    await expect(run()).rejects.toThrow(/400: Invalid JSON payload: unknown name reasoning_effort/);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]!.reasoning_effort).toBe("low");
+    expect(bodies[1]!.reasoning_effort).toBeUndefined();
+  });
+
   afterEach(() => vi.unstubAllGlobals());
 
   it("sends a thinking level and usage request, and no reply cap that thinking could eat", async () => {

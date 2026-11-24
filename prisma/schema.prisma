@@ -600,6 +600,8 @@ model AiTurnLog {
   toolErrorCount Int             @default(0)
   // The customer's question, truncated (for "unanswered questions" reporting).
   userText       String          @default("")
+  // Why a turn ended in "error" (the provider's own message), for diagnosing failures.
+  errorReason    String?
   intent         String          @default("")
   at             DateTime        @default(now())
 

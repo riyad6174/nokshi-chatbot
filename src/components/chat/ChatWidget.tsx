@@ -910,16 +910,27 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       : "idle";
 
   // Typed text (composer, chips, forms) during voice mode goes through the voice turn so the answer is spoken.
+  // Typed text in the voice panel during a connected call is answered aloud on the call. Anywhere
+  // else (the text chat), it's a normal chat message with a typed reply. While the call is still
+  // connecting (e.g. the microphone prompt is unanswered) it also goes through the normal chat.
   const sendTyped = useCallback(
     (text: string) => {
-      // Only once the call is connected: while it's still connecting (e.g. the microphone prompt is
-      // unanswered), a typed message goes through the normal chat instead of getting lost.
       const connected = voiceSession.active && voiceSession.phase !== "starting";
-      if (connected && text.trim() && mode !== "human") void voiceSession.submitText(text.trim());
+      const inVoicePanel = open && view === "voice";
+      if (connected && inVoicePanel && text.trim() && mode !== "human") void voiceSession.submitText(text.trim());
       else void sendMessage(text);
     },
-    [mode, sendMessage, voiceSession],
+    [mode, open, sendMessage, view, voiceSession],
   );
+
+  // The text chat is for typing: switching to it ends a running call (mic off), so replies come back
+  // as text and stray sounds can't start voice turns. The conversation and cart carry over.
+  const openTextChat = useCallback(() => {
+    if (voiceSession.active) voiceSession.stop();
+    setError(null);
+    setView("chat");
+    setOpen(true);
+  }, [voiceSession]);
 
   // Once an order is placed the call carries on: the assistant asks if they need anything else and
   // ends the call itself when they're done (end_call). If the customer says nothing more for a while,
@@ -1470,10 +1481,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         position={position}
         onSpeakingChange={setWelcomeSpeaking}
         onTalk={() => void startVoiceAssistant()}
-        onChat={() => {
-          setView("chat");
-          setOpen(true);
-        }}
+        onChat={openTextChat}
       />
       {voiceView ? (
         <CardStage
@@ -1509,10 +1517,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           onResume={voiceSession.resume}
           onInterrupt={voiceSession.interrupt}
           onLang={voiceSession.setLang}
-          onOpenChat={() => {
-            setError(null);
-            setView("chat");
-          }}
+          onOpenChat={openTextChat}
           onClose={closePanel}
           cardsHidden={latestCards && !cardsOpen ? cardsLabel : null}
           onShowCards={() => setCardsOpen(true)}
@@ -1625,8 +1630,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
             className="text-left"
             onClick={() => {
               setNudge(null);
-              setView("chat");
-              setOpen(true);
+              openTextChat();
             }}
           >
             {nudge}

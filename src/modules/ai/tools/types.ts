@@ -9,6 +9,10 @@ export type ToolContext = {
   channel?: "text" | "voice";
   /** The customer's latest message, kept as evidence when they give marketing consent. */
   latestUserText?: string;
+  /** The customer's last few messages, newest first (live voice: a request isn't lost behind a stray line). */
+  recentUserTexts?: string[];
+  /** The customer said yes right after the assistant offered to connect them with a person. */
+  acceptedPersonOffer?: boolean;
   /** Context for cost-saving caches: never reuse a canned answer mid-cart or mid-order. */
   cartItemCount?: number;
   openOrder?: boolean;

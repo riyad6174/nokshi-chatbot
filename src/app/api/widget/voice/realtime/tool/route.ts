@@ -6,6 +6,8 @@ import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
 import { logger } from "@/lib/logging/logger";
 import { rateLimit } from "@/lib/rate-limit";
 import { executeTool } from "@/modules/ai/tools";
+import { AFFIRMATIVE, OFFERS_PERSON } from "@/modules/ai/tools/request-human";
+import { isNoiseTranscript } from "@/modules/speech/echo";
 import { knowledgeSourcesFrom } from "@/modules/ai/tools/search-knowledge";
 import { getSessionContext } from "@/modules/conversations/session.service";
 import {
@@ -47,18 +49,28 @@ export async function POST(request: NextRequest) {
   if (!context) return jsonError(401, "session_expired", "Your chat session expired. Please reload the chat.");
   if (!liveVoiceActive(context.store)) return jsonError(403, "realtime_unavailable", "Live voice isn't available.");
 
-  // Only these tools read the customer's latest words; skip the lookup for the rest (every call waits on it).
-  const latestUser = TOOLS_READING_LATEST_TEXT.has(parsed.data.name)
-    ? await prisma.message.findFirst({
-        where: { conversationId: context.conversationId, role: "user" },
-        orderBy: { createdAt: "desc" },
-        select: { content: true },
-      })
-    : null;
+  // Only these tools read the customer's words; skip the lookup for the rest (every call waits on it).
+  // Stray noise lines (older calls saved some) are skipped, so they can't hide what the customer said.
+  const recent = TOOLS_READING_LATEST_TEXT.has(parsed.data.name)
+    ? (
+        await prisma.message.findMany({
+          where: { conversationId: context.conversationId, role: { in: ["user", "assistant"] } },
+          orderBy: { createdAt: "desc" },
+          take: 10,
+          select: { role: true, content: true },
+        })
+      ).filter((message) => message.role === "assistant" || !isNoiseTranscript(message.content))
+    : [];
+  const recentUserTexts = recent.filter((message) => message.role === "user").slice(0, 3).map((message) => message.content);
+  // "Shall I connect you with our team?" -> "হ্যাঁ": a yes to the assistant's own offer of a person.
+  const latestIndex = recent.findIndex((message) => message.role === "user");
+  const offerBefore = latestIndex >= 0 ? recent.slice(latestIndex + 1).find((message) => message.role === "assistant") : undefined;
+  const acceptedPersonOffer =
+    latestIndex >= 0 && AFFIRMATIVE.test(recent[latestIndex]!.content.trim()) && Boolean(offerBefore && OFFERS_PERSON.test(offerBefore.content));
   const turnStartedAt = new Date(Date.now() - (parsed.data.speechAgoMs ?? 0));
 
   const result = await executeTool(
-    { session: context, turnStartedAt, channel: "voice", latestUserText: latestUser?.content ?? "" },
+    { session: context, turnStartedAt, channel: "voice", latestUserText: recentUserTexts[0] ?? "", recentUserTexts, acceptedPersonOffer },
     parsed.data.name,
     parsed.data.arguments,
   );
