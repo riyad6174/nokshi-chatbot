@@ -12,7 +12,7 @@ const schema = z.object({
 export const getOrderStatusTool: ToolDefinition = {
   name: "get_order_status",
   description:
-    "Look up order status. With no arguments, returns orders placed in this chat. For any other order, BOTH the order number (e.g. NB-7K2QX9) and the phone number used for the order are required; ask the customer for them. Never guess or reveal an order without a match.",
+    "Look up order status, only when the customer asks about an order (status, delivery, \"where is my order\"); never just because an order was placed earlier. With no arguments, returns orders placed in this chat. For any other order, BOTH the order number (e.g. NB-7K2QX9) and the phone number used for the order are required; ask the customer for them. Never guess or reveal an order without a match.",
   parameters: {
     type: "object",
     additionalProperties: false,

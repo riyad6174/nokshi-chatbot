@@ -10,6 +10,7 @@ import { useVoiceRecorder } from "@/components/chat/useVoiceRecorder";
 import { AssistantOrb, type OrbState } from "@/components/chat/AssistantOrb";
 import { Confetti } from "@/components/chat/Confetti";
 import { FloatingActions, hasSlot, opensCardStage, pickLatestActions } from "@/components/chat/FloatingActions";
+import { mergeMessages } from "@/components/chat/messages";
 import { ProductDetailsLinkContext } from "@/components/chat/ProductCard";
 import { VoiceControlCard } from "@/components/chat/VoiceControlCard";
 import { VoiceDock } from "@/components/chat/VoiceDock";
@@ -84,12 +85,6 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
-  if (incoming.length === 0) return current;
-  const known = new Set(current.map((message) => message.id));
-  const fresh = incoming.filter((message) => !known.has(message.id));
-  return fresh.length === 0 ? current : [...current, ...fresh];
-}
 
 const VISITOR_KEY = "nokshi:visitor-id";
 
@@ -139,6 +134,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   );
   const [session, setSession] = useState<WidgetSessionResponse | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /** Set when the customer switches to the text chat: a call still connecting must not start. */
+  const voiceCancelledRef = useRef(false);
   /** From the tap on "start talking" until the call is up (or failed): drives the "Connecting…" state. */
   const [voiceStarting, setVoiceStarting] = useState(false);
   /** Messages that existed when the current call started: never shown as the call's caption. */
@@ -170,6 +167,11 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   const loadingRef = useRef(false);
   const sendingRef = useRef(false);
   const inflightRef = useRef(0);
+  /** Temporary message ids whose turn is queued or streaming: a re-sync must not drop or replace them. */
+  const inFlightIdsRef = useRef<Set<string>>(new Set());
+  /** Typed messages sent while a reply was still coming: sent in order once it's done. */
+  const queueRef = useRef<Array<{ userMessage: ChatMessage; text: string; attachments: Array<{ uploadId: string; transcript?: string; durationMs?: number }> }>>([]);
+  const flushQueueRef = useRef<() => void>(() => undefined);
   const checkoutBusyRef = useRef(false);
   const lastSeenRef = useRef<string | null>(null);
   const openRef = useRef(open);
@@ -216,7 +218,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         setSession(data);
         // A re-sync (e.g. moving to a product page during a call) keeps what's on screen, including
         // a live reply that isn't saved yet; only a new conversation replaces the history.
-        if (sameConversation) setMessages((current) => mergeMessages(current, data.messages));
+        if (sameConversation) setMessages((current) => mergeMessages(current, data.messages, { full: true, inFlight: inFlightIdsRef.current }));
         else setMessages(data.messages);
         noteLatest(data.messages);
         setCart(data.cart);
@@ -288,7 +290,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         setAgentName(body.agentName);
         if (body.messages.length > 0) {
           setMessages((current) => {
-            const merged = mergeMessages(current, body.messages);
+            const merged = mergeMessages(current, body.messages, { inFlight: inFlightIdsRef.current });
             noteLatest(merged);
             return merged;
           });
@@ -330,7 +332,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
           setAgentName(body.agentName);
           if (body.messages.length > 0) {
             setMessages((current) => {
-              const merged = mergeMessages(current, body.messages);
+              const merged = mergeMessages(current, body.messages, { inFlight: inFlightIdsRef.current });
               noteLatest(merged);
               return merged;
             });
@@ -408,13 +410,20 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       const userTempId = input.optimisticUser?.id ?? null;
       const pendingMessage: ChatMessage = {
         id: pendingId,
+        localKey: pendingId,
         role: "assistant",
         parts: [],
         createdAt: new Date(timestamp).toISOString(),
       };
+      inFlightIdsRef.current.add(pendingId);
+      if (userTempId) inFlightIdsRef.current.add(userTempId);
+      // The customer moved on: cards from the previous answer (e.g. a placed order) step aside; new
+      // cards in this reply open the stage again.
+      if (input.optimisticUser) setCardsOpen(false);
       setMessages((previous) => [
         ...previous,
-        ...(input.optimisticUser ? [input.optimisticUser] : []),
+        // A queued message is already on screen.
+        ...(input.optimisticUser && !previous.some((message) => message.id === input.optimisticUser!.id) ? [input.optimisticUser] : []),
         ...(mode === "bot" ? [pendingMessage] : []),
       ]);
 
@@ -469,11 +478,16 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
             const real = (data as { userMessage?: ChatMessage })?.userMessage;
             if (real) {
               setMessages((previous) => {
+                // Already on screen (a refresh brought it): just drop the temporary copy.
+                if (previous.some((message) => message.id === real.id)) {
+                  return userTempId ? previous.filter((message) => message.id !== userTempId) : previous;
+                }
                 if (userTempId && previous.some((message) => message.id === userTempId)) {
                   return previous.map((message) =>
                     message.id === userTempId
                       ? {
                           ...real,
+                          localKey: message.localKey ?? message.id,
                           attachments: real.attachments ?? message.attachments,
                         }
                       : message,
@@ -501,7 +515,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
             if (nextCart) setCart(nextCart);
           } else if (event === "message.event") {
             const message = (data as { message?: ChatMessage })?.message;
-            if (message) setMessages((previous) => mergeMessages(previous, [message]));
+            if (message) setMessages((previous) => mergeMessages(previous, [message], { inFlight: inFlightIdsRef.current }));
             // An order was placed during this turn: the cart was checked out.
             if (message?.parts.some((part) => part.type === "order_status")) {
               void fetch("/api/widget/cart")
@@ -516,7 +530,9 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
             const id = (data as { messageId?: string | null })?.messageId;
             setMessages((previous) => {
               const updated = id
-                ? previous.map((message) => (message.id === pendingId ? { ...message, id } : message))
+                ? previous.some((message) => message.id === id)
+                  ? previous.filter((message) => message.id !== pendingId)
+                  : previous.map((message) => (message.id === pendingId ? { ...message, id } : message))
                 : previous.filter((message) => message.id !== pendingId || message.parts.length > 0);
               noteLatest(updated);
               return updated;
@@ -554,14 +570,33 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         );
       } finally {
         setWorkingTool(null);
+        inFlightIdsRef.current.delete(pendingId);
+        if (userTempId) inFlightIdsRef.current.delete(userTempId);
         inflightRef.current -= 1;
         if (inflightRef.current === 0) {
           sendingRef.current = false;
           setSending(false);
+          // Messages typed while this reply was coming go next, in order.
+          if (queueRef.current.length > 0) flushQueueRef.current();
         }
       }
     },
     [initSession, mode, navigateTo, noteLatest],
+  );
+
+  const postTyped = useCallback(
+    (text: string, attachments: Array<{ uploadId: string; transcript?: string; durationMs?: number }>) => (active: WidgetSessionResponse) =>
+      fetch("/api/widget/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: active.conversationId,
+          message: text,
+          locale: active.locale,
+          attachments,
+        }),
+      }),
+    [],
   );
 
   const sendMessage = useCallback(
@@ -576,14 +611,18 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       const text = raw.trim();
       const ready = pending.filter((item) => item.status === "ready" && item.uploadId);
       const attachments = [...ready.map((item) => ({ uploadId: item.uploadId! })), ...extraAttachments];
-      if ((!text && attachments.length === 0) || sendingRef.current) return;
+      if (!text && attachments.length === 0) return;
 
+      // Sent means sent: the box clears and the message shows right away, even when a reply is still
+      // coming (it's then queued and goes as soon as that reply is done).
       setDraft("");
       setPending((current) => current.filter((item) => item.status === "error"));
 
       const timestamp = Date.now();
+      const id = `user-${timestamp}-${Math.random().toString(36).slice(2, 6)}`;
       const userMessage: ChatMessage = {
-        id: `user-${timestamp}`,
+        id,
+        localKey: id,
         role: "user",
         parts: text ? [{ type: "text", text }] : [],
         attachments: ready.map((item) => ({
@@ -597,24 +636,32 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         createdAt: new Date(timestamp).toISOString(),
       };
 
+      if (sendingRef.current) {
+        inFlightIdsRef.current.add(id);
+        queueRef.current.push({ userMessage, text, attachments });
+        setMessages((previous) => [...previous, userMessage]);
+        return;
+      }
+
       await deliverTurn({
         optimisticUser: userMessage,
         retryText: text || undefined,
-        post: (active) =>
-          fetch("/api/widget/message", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              conversationId: active.conversationId,
-              message: text,
-              locale: active.locale,
-              attachments,
-            }),
-          }),
+        post: postTyped(text, attachments),
       });
     },
-    [deliverTurn, pending],
+    [deliverTurn, pending, postTyped],
   );
+
+  // Sends the next queued message (one at a time; the next goes when its reply is done).
+  flushQueueRef.current = () => {
+    const next = queueRef.current.shift();
+    if (!next) return;
+    void deliverTurn({
+      optimisticUser: next.userMessage,
+      retryText: next.text || undefined,
+      post: postTyped(next.text, next.attachments),
+    });
+  };
 
   const voiceLangRef = useRef<VoiceLang>("bn");
   const setVoiceLangRef = useRef<(lang: VoiceLang) => void>(() => undefined);
@@ -672,17 +719,20 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   }, []);
   // Shared by both live engines (OpenAI Realtime and Gemini Live).
   const liveCallbacks: RealtimeCallbacks = {
-    onUserMessage: (message) => setMessages((previous) => mergeMessages(previous, [message])),
-    onReplyStart: (replyId) =>
+    onUserMessage: (message) => setMessages((previous) => mergeMessages(previous, [message], { inFlight: inFlightIdsRef.current })),
+    onReplyStart: (replyId) => {
+      inFlightIdsRef.current.add(`pending-${replyId}`);
       setMessages((previous) => [
         ...previous,
         {
           id: `pending-${replyId}`,
+          localKey: `pending-${replyId}`,
           role: "assistant",
           parts: [],
           createdAt: new Date().toISOString(),
         },
-      ]),
+      ]);
+    },
     onReplyDelta: (replyId, text) =>
       replaceMessage(`pending-${replyId}`, (message) => {
         const parts = [...message.parts];
@@ -704,11 +754,17 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       }));
     },
     onReplyDone: (replyId, stored) => {
-      replaceMessage(`pending-${replyId}`, (message) => (stored ? { ...stored } : message.parts.length > 0 ? message : null));
+      inFlightIdsRef.current.delete(`pending-${replyId}`);
+      replaceMessage(`pending-${replyId}`, (message) =>
+        stored ? { ...stored, localKey: message.localKey ?? message.id } : message.parts.length > 0 ? message : null,
+      );
       // Order placed, handoff: those arrive as event messages saved by the server.
       void fetchNewMessages();
     },
-    onReplyDiscarded: (replyId) => replaceMessage(`pending-${replyId}`, () => null),
+    onReplyDiscarded: (replyId) => {
+      inFlightIdsRef.current.delete(`pending-${replyId}`);
+      replaceMessage(`pending-${replyId}`, () => null);
+    },
   };
   const realtimeVoice = useRealtimeVoice(liveCallbacks);
   const geminiVoice = useGeminiLiveVoice(liveCallbacks);
@@ -739,7 +795,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
 
   const startVoiceCall = useCallback(async () => {
     const active = sessionRef.current ?? (await initSession());
-    if (!active) return;
+    // The customer switched to the text chat while this was loading: don't start the call.
+    if (!active || voiceCancelledRef.current) return;
     if (!window.isSecureContext) {
       // Browsers only allow the microphone on https:// pages (and localhost).
       setError({ message: "Voice needs a secure (https://) connection to this site. You can keep chatting by text." });
@@ -758,10 +815,13 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     if (configured.engine !== "cascade" && caps.server) {
       if (!configured.enabled) return;
       // The assistant opens the call itself (greets and asks the name).
-      await (configured.engine === "gemini" ? geminiVoice : realtimeVoice).start({
+      const live = configured.engine === "gemini" ? geminiVoice : realtimeVoice;
+      await live.start({
         lang,
         maxSessionMinutes: configured.maxSessionMinutes,
       });
+      // Switched to the text chat while connecting: end the call that just came up.
+      if (voiceCancelledRef.current) live.stop();
       return;
     }
     const speech = configured.speech === "server" && caps.server ? "server" : caps.browser ? "browser" : null;
@@ -777,6 +837,10 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
       maxSessionMinutes: configured.maxSessionMinutes,
     });
     if (!started) return;
+    if (voiceCancelledRef.current) {
+      cascadeVoice.stop();
+      return;
+    }
     try {
       const params = new URLSearchParams({
         widgetKey: WIDGET_KEY,
@@ -814,6 +878,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
     // Show "Connecting…" from the tap on (loading the chat session can take a moment), and start
     // the call with an empty caption: only what's said on this call is shown, never older replies.
     captionBaselineRef.current = null;
+    voiceCancelledRef.current = false;
     setVoiceStarting(true);
     try {
       await startVoiceCall();
@@ -866,7 +931,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         if (!response.ok) throw new Error(body?.error?.message || "The order could not be placed. Nothing was charged.");
         const fresh = (body.messages ?? []) as ChatMessage[];
         setMessages((previous) => {
-          const merged = mergeMessages(previous, fresh);
+          const merged = mergeMessages(previous, fresh, { inFlight: inFlightIdsRef.current });
           noteLatest(merged);
           return merged;
         });
@@ -926,6 +991,8 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
   // The text chat is for typing: switching to it ends a running call (mic off), so replies come back
   // as text and stray sounds can't start voice turns. The conversation and cart carry over.
   const openTextChat = useCallback(() => {
+    // Also cancels a call that is still connecting (it would otherwise come up behind the text chat).
+    voiceCancelledRef.current = true;
     if (voiceSession.active) voiceSession.stop();
     setError(null);
     setView("chat");
@@ -1212,7 +1279,7 @@ export function ChatWidget({ productId }: ChatWidgetProps = {}) {
         if (body.show && body.message) {
           const message = body.message;
           setMessages((current) => {
-            const merged = mergeMessages(current, [message]);
+            const merged = mergeMessages(current, [message], { inFlight: inFlightIdsRef.current });
             noteLatest(merged);
             return merged;
           });

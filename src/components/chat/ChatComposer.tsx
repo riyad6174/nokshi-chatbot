@@ -17,6 +17,8 @@ type ChatComposerProps = {
   setDraft: (value: string) => void;
   onSend: (text: string) => void;
   disabled?: boolean;
+  /** A reply is still coming: typing and sending stay possible (sent messages wait their turn). */
+  busy?: boolean;
   active?: boolean;
   accent: string;
   placeholder: string;
@@ -44,6 +46,7 @@ export function ChatComposer({
   setDraft,
   onSend,
   disabled,
+  busy = false,
   active,
   accent,
   placeholder,
@@ -83,7 +86,10 @@ export function ChatComposer({
   const canSend = !disabled && !uploading && (draft.trim().length > 0 || hasReady);
 
   const submit = () => {
-    if (canSend) onSend(draft);
+    if (!canSend) return;
+    onSend(draft);
+    // Keep typing where you were (not on touch screens, where focus would keep the keyboard up).
+    if (!window.matchMedia("(pointer: coarse)").matches) textareaRef.current?.focus();
   };
 
   if (recording) {
@@ -215,6 +221,8 @@ export function ChatComposer({
           disabled={disabled}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
+            // Bangla (and other) keyboards use Enter to finish a word: never send half-typed text.
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               submit();
@@ -250,14 +258,17 @@ export function ChatComposer({
           <button
             type="submit"
             disabled={!canSend}
-            aria-label="Send message"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white transition hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={busy ? "Send message (it goes after the current reply)" : "Send message"}
+            className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white transition hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
             style={{ backgroundColor: accent }}
           >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="m22 2-7 20-4-9-9-4Z" />
               <path d="M22 2 11 13" />
             </svg>
+            {busy ? (
+              <span className="absolute -right-1 -top-1 h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent bg-transparent" style={{ borderColor: `${accent} transparent ${accent} ${accent}` }} aria-hidden="true" />
+            ) : null}
           </button>
         )}
       </form>

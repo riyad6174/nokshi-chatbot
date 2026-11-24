@@ -255,7 +255,16 @@ async function fetchWithRetry(url: string, init: RequestInit & { signal: AbortSi
     try {
       response = await fetch(url, init);
       if (response.ok || !isRetryableStatus(response.status) || attempt >= MAX_RETRIES) return response;
-      await response.body?.cancel().catch(() => undefined);
+      // A used-up daily/plan quota doesn't come back in seconds: return it right away (the caller can
+      // switch to a backup model) instead of waiting through the retries.
+      if (response.status === 429) {
+        const body = await response.text().catch(() => "");
+        if (/exceeded your current quota|PerDay|RESOURCE_EXHAUSTED|insufficient_quota/i.test(body)) {
+          return new Response(body, { status: response.status, headers: response.headers });
+        }
+      } else {
+        await response.body?.cancel().catch(() => undefined);
+      }
     } catch (error) {
       if (init.signal.aborted || attempt >= MAX_RETRIES) throw error;
     }
@@ -396,7 +405,20 @@ export async function* streamCompletion(input: StreamCompletionInput): AsyncGene
     });
     return;
   }
-  yield* streamOpenAiCompatible(input);
+  // Out of quota or overloaded before anything streamed: try the backup model once (if one is set).
+  const fallback = input.config.fallbackModel;
+  let streamed = false;
+  try {
+    for await (const event of streamOpenAiCompatible(input)) {
+      streamed = true;
+      yield event;
+    }
+  } catch (error) {
+    const status = error instanceof ProviderError ? error.status : undefined;
+    if (streamed || !fallback || fallback === input.config.model || (status !== 429 && status !== 503)) throw error;
+    logger.warn("ai.provider_fallback", { model: input.config.model, fallback, status });
+    yield* streamOpenAiCompatible({ ...input, config: { ...input.config, model: fallback } });
+  }
 }
 
 /** Dashboard "Test connection" for OpenAI-compatible APIs: lists models without generating tokens. */

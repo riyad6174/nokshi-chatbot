@@ -85,7 +85,27 @@ export type ProductSearchInput = {
   semanticScores?: Map<string, number>;
 };
 
-function matchesFilters(product: ProductWithVariants, filters: Record<string, string>): boolean {
+/** Size words and their codes, so "Medium" matches a variant stored as size "M" (and back). */
+const SIZE_CODES: Record<string, string> = {
+  "extra small": "xs",
+  "x-small": "xs",
+  small: "s",
+  medium: "m",
+  large: "l",
+  "extra large": "xl",
+  "x-large": "xl",
+  "double extra large": "xxl",
+  "2xl": "xxl",
+  "xx-large": "xxl",
+};
+export const sizeCode = (value: string) => SIZE_CODES[value.trim().toLowerCase()] ?? value.trim().toLowerCase();
+
+/** Whether a stored value (option, title, attribute) means what the customer asked for. */
+export function sameValue(stored: string, wanted: string): boolean {
+  return stored.includes(wanted) || sizeCode(stored) === sizeCode(wanted);
+}
+
+export function matchesFilters(product: ProductWithVariants, filters: Record<string, string>): boolean {
   const attributes = Object.fromEntries(
     Object.entries(parseOptions(product.attributes)).map(([key, value]) => [key.toLowerCase(), value.toLowerCase()]),
   );
@@ -93,13 +113,17 @@ function matchesFilters(product: ProductWithVariants, filters: Record<string, st
     const key = rawKey.trim().toLowerCase();
     const value = rawValue.trim().toLowerCase();
     if (!key || !value) return true;
-    // Variant options (color, size) must match on an available variant.
+    // Variant options (color, size) must match on an available variant: by the option itself, or by
+    // the variant's name ("Medium", "Olive"), so a size asked as "Medium" finds size "M".
     const variantMatch = product.variants.some((variant) => {
       if (!variantAvailable(variant)) return false;
       const options = parseOptions(variant.options);
-      return Object.entries(options).some(([optionKey, optionValue]) => optionKey.toLowerCase() === key && optionValue.toLowerCase().includes(value));
+      const byOption = Object.entries(options).some(([optionKey, optionValue]) => optionKey.toLowerCase() === key && sameValue(optionValue.toLowerCase(), value));
+      const title = variant.title.toLowerCase();
+      const byTitle = title.split(/\s*\/\s*/).some((piece) => sameValue(piece, value));
+      return byOption || byTitle;
     });
-    return variantMatch || (attributes[key]?.includes(value) ?? false);
+    return variantMatch || (attributes[key] !== undefined && sameValue(attributes[key]!, value));
   });
 }
 

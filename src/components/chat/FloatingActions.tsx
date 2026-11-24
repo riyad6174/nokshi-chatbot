@@ -123,7 +123,14 @@ export function pickLatestActions(messages: ChatMessage[]) {
     const placed = messages
       .slice(index + 1)
       .some((entry) => entry.role === "event" && entry.parts.some((part) => part.type === "order_status"));
-    return { message, parts, answered, placed };
+    // An order card is for the moment the order happens: once the customer writes something else it
+    // steps aside (the text chat keeps it in the history), and older cards don't come back instead.
+    // An open order summary stays while they ask about it; only placing the order retires it.
+    const current = parts.filter(
+      ({ part }) => !(part.type === "order_status" && answered) && !(part.type === "order_confirmation" && placed),
+    );
+    if (current.length === 0) return null;
+    return { message, parts: current, answered, placed };
   }
   return null;
 }

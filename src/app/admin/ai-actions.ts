@@ -30,6 +30,7 @@ function parseForm(formData: FormData) {
     clearKey: formData.get("clearKey") === "on",
     model: formData.get("model") ?? "",
     effort: formData.get("effort") ?? "medium",
+    fallbackModel: formData.get("fallbackModel") ?? "",
   });
 }
 
@@ -54,6 +55,7 @@ export async function saveAiConnectionAction(formData: FormData) {
     aiBaseUrl: preset.kind === "anthropic" ? data.baseUrl : data.baseUrl || preset.baseUrl,
     model: data.model,
     aiEffort: data.effort,
+    aiFallbackModel: data.fallbackModel,
     ...keyUpdate,
   };
 

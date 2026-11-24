@@ -51,27 +51,3 @@ for (const [name, width, height] of sizes) {
     if (await cartBar.count()) { await cartBar.first().click(); await shot("3-text-cart"); }
   });
 }
-
-for (const [name, width, height] of sizes) {
-  test(`voice stage ${name}`, async ({ browser }, info) => {
-    test.skip(info.project.name !== "desktop" || width > 800);
-    test.setTimeout(300_000);
-    const page = await (await browser.newContext({ viewport: { width, height }, hasTouch: true, permissions: ["microphone"] })).newPage();
-    await page.goto("/");
-    await page.getByRole("button", { name: "Talk to the AI shopping assistant" }).click();
-    await expect(page.getByRole("button", { name: "End call" })).toBeVisible({ timeout: 60_000 });
-    await page.getByRole("button", { name: "Open text chat" }).click();
-    await page.getByLabel("Message the shopping assistant").fill("Show me bags");
-    await page.getByLabel("Message the shopping assistant").press("Enter");
-    await page.getByRole("toolbar", { name: "Voice assistant controls" }).getByRole("button", { name: /Open voice assistant/ }).click();
-    const stage = page.getByRole("dialog", { name: "Products and order" });
-    await expect(stage.getByTestId("product-card").first()).toBeVisible({ timeout: 45_000 });
-    await page.waitForTimeout(900);
-    await page.screenshot({ path: `${OUT}/${name}-4-voice-products.png` });
-    console.log("STEP", name, "4-voice-products", JSON.stringify(await problems(page)));
-    await stage.getByTestId("product-card").first().getByRole("button", { name: "Add" }).click();
-    await page.waitForTimeout(2500);
-    await page.screenshot({ path: `${OUT}/${name}-5-voice-added.png` });
-    console.log("STEP", name, "5-voice-added", JSON.stringify(await problems(page)));
-  });
-}

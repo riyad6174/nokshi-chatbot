@@ -105,6 +105,36 @@ describe("Gemini text requests", () => {
     expect(replayed.tool_calls![0]!.extra_content).toEqual(signature);
   });
 
+  it("switches to the backup model straight away when the main model's quota is used up", async () => {
+    const models: string[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { model: string };
+      models.push(body.model);
+      if (body.model === "gemini-3.8-flash") {
+        return new Response(JSON.stringify([{ error: { code: 429, message: "You exceeded your current quota, please check your plan and billing details.", status: "RESOURCE_EXHAUSTED" } }]), { status: 429 });
+      }
+      const chunk = { choices: [{ delta: { content: "OK" }, finish_reason: "stop" }] };
+      return new Response(`data: ${JSON.stringify(chunk)}
+
+data: [DONE]
+
+`, { status: 200 });
+    });
+    const config = { providerId: "gemini", kind: "openai-compatible" as const, baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "k", model: "gemini-3.8-flash", effort: "low" as const, fallbackModel: "gemini-flash-lite-latest" };
+    const started = Date.now();
+    let text = "";
+    let model = "";
+    for await (const event of streamCompletion({ config, messages: [{ role: "user", content: "hi" }], tools: [] })) {
+      if (event.type === "delta") text += event.text;
+      if (event.type === "done") model = event.model ?? "";
+    }
+    expect(text).toBe("OK");
+    expect(model).toBe("gemini-flash-lite-latest");
+    // No retry waits on a used-up quota: one request to the main model, then the backup.
+    expect(models).toEqual(["gemini-3.8-flash", "gemini-flash-lite-latest"]);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it("retries a rejected Gemini request once without the optional fields, and reports the reason", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {

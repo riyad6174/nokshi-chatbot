@@ -183,6 +183,7 @@ export const aiConnectionFormSchema = z.object({
   clearKey: z.boolean(),
   model: z.string().trim().min(1, "Choose a model").max(150),
   effort: z.enum(["low", "medium", "high", "xhigh", "max"]),
+  fallbackModel: z.string().trim().max(150).default(""),
 });
 
 /** USD per one million tokens. `*` as the model is a provider-wide fallback. */

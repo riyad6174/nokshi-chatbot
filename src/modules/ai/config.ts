@@ -10,6 +10,8 @@ export type AiConfig = {
   apiKey: string;
   model: string;
   effort: EffortLevel;
+  /** Tried once when the main model is out of quota or overloaded. */
+  fallbackModel?: string;
 };
 
 export type AiConfigStatus = {
@@ -25,6 +27,7 @@ export type AiConfigStatus = {
 type SettingsLike = Pick<
   ChatbotSettings,
   "provider" | "model" | "aiBaseUrl" | "aiApiKeyEncrypted" | "aiApiKeyLast4" | "aiEffort"
+> & Partial<Pick<ChatbotSettings, "aiFallbackModel">
 > | null | undefined;
 
 function isLocalUrl(url: string): boolean {
@@ -81,8 +84,10 @@ export function resolveAiStatus(settings: SettingsLike): AiConfigStatus {
 
   const keyOk = apiKey.length > 0 || (!preset.keyRequired && isLocalUrl(baseUrl));
   const baseOk = preset.kind === "anthropic" || baseUrl.length > 0;
+  const savedFallback = settings?.aiFallbackModel?.trim();
+  const fallbackModel = (dashboard && savedFallback) || preset.fallbackModel || "";
   const config = keyOk && baseOk && model
-    ? { providerId: preset.id, kind: preset.kind, baseUrl, apiKey, model, effort }
+    ? { providerId: preset.id, kind: preset.kind, baseUrl, apiKey, model, effort, ...(fallbackModel && fallbackModel !== model ? { fallbackModel } : {}) }
     : null;
 
   return { config, providerId: preset.id, model, keySource, keyLast4, keyUnreadable };

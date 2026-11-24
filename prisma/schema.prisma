@@ -63,6 +63,8 @@ model ChatbotSettings {
   aiApiKeyEncrypted  String   @default("")
   aiApiKeyLast4      String   @default("")
   aiEffort           String   @default("medium")
+  // Used when the main model is out of quota or overloaded (429/503). Blank: the provider's default backup.
+  aiFallbackModel    String?
   // Live voice (Admin → AI model). Optional: blank uses the VOICE_ENGINE / REALTIME_* env values.
   voiceEngine             String?
   realtimeModel           String?

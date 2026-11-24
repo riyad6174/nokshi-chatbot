@@ -17,6 +17,22 @@ describe("product cards over the page", () => {
     expect(opensCardStage(pickLatestActions([reply([card, navigate])]))).toBe(false);
   });
 
+  it("lets the placed-order card step aside once the customer asks something else", () => {
+    const placed = { type: "order_status", orders: [{ orderNumber: "NB-1", status: "placed" }] } as unknown as ChatPart;
+    const event: ChatMessage = { id: "e1", role: "event", parts: [placed], createdAt: "2026-11-24T10:00:01.000Z" };
+    expect(pickLatestActions([reply([card]), event])?.parts.map((entry) => entry.part.type)).toEqual(["order_status"]);
+    const asked: ChatMessage = { id: "u2", role: "user", parts: [{ type: "text", text: "what else do you have?" }], createdAt: "2026-11-24T10:00:05.000Z" };
+    const answer: ChatMessage = { id: "a2", role: "assistant", parts: [{ type: "text", text: "Bags, clothing…" }], createdAt: "2026-11-24T10:00:06.000Z" };
+    // Neither the order card nor older cards (the products before it) stay on the stage.
+    expect(pickLatestActions([reply([card]), event, asked, answer])).toBeNull();
+  });
+
+  it("keeps an open order summary while the customer asks about it", () => {
+    const summary = { type: "order_confirmation", confirmation: { confirmationId: "c1" } } as unknown as ChatPart;
+    const question: ChatMessage = { id: "u3", role: "user", parts: [{ type: "text", text: "is it cash on delivery?" }], createdAt: "2026-11-24T10:00:09.000Z" };
+    expect(pickLatestActions([reply([summary]), question])?.parts.map((entry) => entry.part.type)).toEqual(["order_confirmation"]);
+  });
+
   it("has nothing to open without cards", () => {
     expect(opensCardStage(pickLatestActions([]))).toBe(false);
   });

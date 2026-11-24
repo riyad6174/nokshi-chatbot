@@ -81,6 +81,7 @@ export default async function AdminAiPage({
             baseUrl: store.settings?.aiBaseUrl || (preset.kind === "anthropic" ? "" : preset.baseUrl),
             model: status.model,
             effort: store.settings?.aiEffort || "medium",
+            fallbackModel: store.settings?.aiFallbackModel ?? "",
             keySource: status.keySource,
             keyLast4: status.keyLast4,
             keyUnreadable: status.keyUnreadable,

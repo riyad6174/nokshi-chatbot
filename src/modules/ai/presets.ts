@@ -10,6 +10,8 @@ export type ProviderPreset = {
   baseUrl: string;
   /** Suggested model; the admin can type any model the provider serves. */
   suggestedModel: string;
+  /** Backup model when the main one is out of quota or overloaded (blank: none). */
+  fallbackModel?: string;
   keyRequired: boolean;
   keyHelpUrl?: string;
   note?: string;
@@ -59,6 +61,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     kind: "openai-compatible",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     suggestedModel: "gemini-3.8-flash",
+    // A light model with its own quota: keeps the chat answering when the main model's quota runs out.
+    fallbackModel: "gemini-flash-lite-latest",
     keyRequired: true,
     keyHelpUrl: "https://aistudio.google.com/apikey",
     note: "The same Gemini key also powers live voice (Gemini Live) below. Effort \"low\" gives the fastest replies and uses the fewest tokens; test the connection to load the models your key can use.",

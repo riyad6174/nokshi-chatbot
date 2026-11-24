@@ -206,6 +206,8 @@ export async function* runLiveAssistant(input: {
   const knowledgeSources: Array<{ title: string; excerpt: string }> = [];
   let receivedAnyText = false;
   let turnRefused = false;
+  /** One extra round already asked the model to answer in words (after it ended with no text). */
+  let nudgedForText = false;
   let totalUsage = emptyUsage();
   /** How long each model round took (request to end of stream), for the timing log. */
   const roundMs: number[] = [];
@@ -232,7 +234,7 @@ export async function* runLiveAssistant(input: {
         tools,
         signal: input.signal,
         temperature: 0.2,
-        toolChoice: finalRound ? "none" : "auto",
+        toolChoice: finalRound || nudgedForText ? "none" : "auto",
         // Replies are one short sentence; this only stops runaway output (Bangla needs more tokens).
         maxOutputTokens: (input.channel ?? "text") === "voice" ? 350 : 500,
         cacheKey: `${input.session.storeId}:${input.channel ?? "text"}`,
@@ -293,6 +295,18 @@ export async function* runLiveAssistant(input: {
     }
 
     if (toolCalls.length === 0) {
+      // The model ended without saying anything (some models do after a tool result). Before counting
+      // the turn as a miss (fallback text; two misses hand the chat to a person), ask once for the
+      // reply itself, with tools off.
+      if (!receivedAnyText && builder.text().length === 0 && !nudgedForText && iteration < MAX_TOOL_ITERATIONS) {
+        nudgedForText = true;
+        logger.warn("ai.empty_reply_retry", { storeId: input.session.storeId, round: iteration });
+        messages.push({
+          role: "user",
+          content: "(Note from the shop system, not the customer: reply to the customer now, in one or two short sentences in their language, using the results above.)",
+        });
+        continue;
+      }
       break;
     }
     if (finalRound) {

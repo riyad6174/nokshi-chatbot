@@ -1,16 +1,15 @@
 import { writeFileSync } from "node:fs";
-import { NextRequest } from "next/server";
-import { PrismaClient } from "@prisma/client";
 import { describe, it } from "vitest";
 import { POST as createSessionRoute } from "@/app/api/widget/session/route";
 import { POST as geminiSessionRoute } from "@/app/api/widget/voice/gemini/session/route";
 import { POST as toolRoute } from "@/app/api/widget/voice/realtime/tool/route";
 import { POST as transcriptRoute } from "@/app/api/widget/voice/realtime/transcript/route";
 import { WIDGET_COOKIE } from "@/lib/auth/widget";
-import { encryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db/prisma";
 import { getCartSummary } from "@/modules/cart/cart.service";
-import { resetDb } from "../helpers/fixtures";
+import { normalizeGeminiUsage } from "@/modules/realtime/gemini-live.service";
+import { addTotals, copyStore as copyStoreFrom, emptyTotals, formatTotals, post, setLanguage, type TokenTotals } from "./checkup-store";
+
 
 // End-to-end checkup of the Gemini Live voice assistant: the real Gemini Live model, the real
 // session/tool/transcript routes, run against an in-memory COPY of the store (catalog, knowledge,
@@ -26,57 +25,10 @@ const GEMINI_KEY = process.env.EVAL_GEMINI_API_KEY?.trim();
 const TTS_MODEL = process.env.EVAL_TTS_MODEL?.trim() || "gemini-3.8-flash-tts";
 const REPORT_PATH = process.env.EVAL_REPORT_PATH?.trim();
 
+const copyStore = () => copyStoreFrom(SOURCE_URL!, GEMINI_KEY!);
+
 // --- store copy ----------------------------------------------------------------------------------
 
-const COLLECTIONS = ["Store", "ChatbotSettings", "Product", "ProductVariant", "KnowledgeDocument"];
-
-async function copyStore() {
-  await resetDb();
-  const source = new PrismaClient({ datasourceUrl: SOURCE_URL });
-  try {
-    for (const name of COLLECTIONS) {
-      const result = (await source.$runCommandRaw({ find: name, filter: {}, batchSize: 10_000 })) as { cursor: { firstBatch: unknown[] } };
-      const docs = result.cursor.firstBatch;
-      if (docs.length) await prisma.$runCommandRaw({ insert: name, documents: docs as never });
-    }
-  } finally {
-    await source.$disconnect();
-  }
-  // Stored keys are sealed with the real AUTH_SECRET; seal the key again for this run.
-  const settings = await prisma.chatbotSettings.findFirstOrThrow();
-  await prisma.chatbotSettings.update({
-    where: { id: settings.id },
-    data: {
-      aiApiKeyEncrypted: encryptSecret(GEMINI_KEY!),
-      geminiApiKeyEncrypted: encryptSecret(GEMINI_KEY!),
-      voiceEngine: "gemini",
-      voiceAssistantEnabled: true,
-    },
-  });
-  return prisma.store.findFirstOrThrow({ include: { settings: true } });
-}
-
-async function setLanguage(language: "bn" | "en" | "auto") {
-  const settings = await prisma.chatbotSettings.findFirstOrThrow();
-  const sales = JSON.parse(settings.salesConfig || "{}") as Record<string, unknown>;
-  await prisma.chatbotSettings.update({ where: { id: settings.id }, data: { salesConfig: JSON.stringify({ ...sales, language }) } });
-}
-
-// --- requests through the real routes ------------------------------------------------------------
-
-let ipCounter = 0;
-function post(path: string, body: unknown, cookie?: string) {
-  ipCounter += 1;
-  return new NextRequest(`http://localhost:3000${path}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-forwarded-for": `10.77.${Math.floor(ipCounter / 250) % 250}.${ipCounter % 250}`,
-      ...(cookie ? { cookie: `${WIDGET_COOKIE}=${cookie}` } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-}
 
 // --- speech --------------------------------------------------------------------------------------
 
@@ -119,10 +71,13 @@ type TurnLog = {
   firstAudioMs: number | null;
   /** How long the spoken reply is (all audio received for this turn). */
   audioMs: number;
+  /** Tokens Gemini reported for this turn (usageMetadata). */
+  tokens: TokenTotals;
   doneMs: number;
   timedOut: boolean;
 };
 type ServerMessage = {
+  usageMetadata?: Record<string, unknown>;
   setupComplete?: unknown;
   serverContent?: {
     modelTurn?: { parts?: Array<{ thought?: boolean; inlineData?: { data?: string } }> };
@@ -188,6 +143,7 @@ class Call {
       shown: [],
       firstAudioMs: null,
       audioMs: 0,
+      tokens: emptyTotals(),
       doneMs: 0,
       timedOut: false,
     };
@@ -221,6 +177,20 @@ class Call {
       this.listener = (message) => {
         if (idle) clearTimeout(idle);
         const content = message.serverContent;
+        if (message.usageMetadata) {
+          const usage = normalizeGeminiUsage(message.usageMetadata);
+          if (usage) {
+            addTotals(log.tokens, {
+              input: usage.inputTokens,
+              cached: usage.cachedInputTokens,
+              output: usage.outputTokens,
+              reasoning: usage.reasoningTokens,
+              audioIn: usage.audioInputTokens + usage.cachedAudioInputTokens,
+              audioOut: usage.audioOutputTokens,
+              requests: 1,
+            });
+          }
+        }
         if (content?.inputTranscription?.text) log.heard += content.inputTranscription.text;
         if (content?.outputTranscription?.text) log.reply += content.outputTranscription.text;
         for (const part of content?.modelTurn?.parts ?? []) {
@@ -570,6 +540,7 @@ describe.skipIf(!SOURCE_URL || !GEMINI_KEY)("Gemini Live voice checkup", () => {
       `latency to first audio: median ${pct(firstAudio, 0.5)} ms, p90 ${pct(firstAudio, 0.9)} ms (${firstAudio.length} replies)`,
       `tool round-trip on server: median ${pct(toolMs, 0.5)} ms, p90 ${pct(toolMs, 0.9)} ms`,
       `timed-out turns: ${allTurns.filter((turn) => turn.timedOut).length}`,
+      `tokens: ${formatTotals(allTurns.reduce((total, turn) => (addTotals(total, turn.tokens), total), emptyTotals()))} · about ${Math.round(allTurns.reduce((sum, turn) => sum + turn.tokens.input + turn.tokens.cached + turn.tokens.output, 0) / Math.max(1, allTurns.length)).toLocaleString("en-US")} per turn`,
       `longest spoken reply: ${longest ? `${(longest.audioMs / 1000).toFixed(1)} s ("${short(longest.input, 50)}")` : "none"}`,
       "",
       ...checks.map((check) => `${check.pass ? "PASS" : "FAIL"}  ${check.scenario} › ${check.check}${check.detail ? `  —  ${check.detail}` : ""}`),

@@ -428,7 +428,8 @@ export function ChatPanel({
         draft={draft}
         setDraft={setDraft}
         onSend={onSend}
-        disabled={!session || loading || Boolean(sessionError) || (sending && mode === "bot")}
+        disabled={!session || loading || Boolean(sessionError)}
+        busy={sending && mode === "bot"}
         active={open && !loading}
         accent={accent}
         placeholder={withHuman ? "Message our team…" : voiceAssistant.active ? "Or type here…" : "Ask me anything, or tap Talk…"}

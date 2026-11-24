@@ -15,6 +15,7 @@ import {
 import { CheckoutButton } from "@/components/chat/CheckoutButton";
 import { ProductList } from "@/components/chat/ProductList";
 import type { CartPayload, ChatMessage, ChatPart, CustomerDetailsData, SuggestedTopic } from "@/types/chat";
+import { messageKey } from "@/components/chat/messages";
 
 // The assistant works by doing things (showing products, filling the cart, preparing orders), so
 // those actions render as prominent, labelled cards; its words are a lighter narration around them.
@@ -355,7 +356,7 @@ export function MessageList({
   let spotlightKey: string | null = null;
   messages.forEach((message) =>
     message.parts.forEach((part, index) => {
-      if (actionMeta(part)) spotlightKey = `${message.id}-part-${index}`;
+      if (actionMeta(part)) spotlightKey = `${messageKey(message)}-part-${index}`;
     }),
   );
 
@@ -437,7 +438,7 @@ export function MessageList({
   };
 
   const renderPart = (message: ChatMessage, part: ChatPart, index: number, isLatest: boolean) => {
-    const key = `${message.id}-part-${index}`;
+    const key = `${messageKey(message)}-part-${index}`;
     if (part.type === "text") {
       return part.text.trim() ? (
         <Narration
@@ -524,7 +525,7 @@ export function MessageList({
           const handoff = message.parts.find((part) => part.type === "handoff");
           const extra = message.parts.filter((part) => part.type === "order_status");
           return (
-            <div key={message.id} className="space-y-2">
+            <div key={messageKey(message)} className="space-y-2">
               <div className="flex justify-center">
                 <span className="flex animate-pop items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-[11px] text-stone-600">
                   {handoff && handoff.type === "handoff" && handoff.state === "waiting" ? (
@@ -538,7 +539,7 @@ export function MessageList({
               </div>
               {extra.map((part) =>
                 part.type === "order_status" && part.orders.length === 1 && part.orders[0]!.status === "placed" ? (
-                  <OrderSuccessCard key={`${message.id}-success`} order={part.orders[0]!} accent={accent} />
+                  <OrderSuccessCard key={`${messageKey(message)}-success`} order={part.orders[0]!} accent={accent} />
                 ) : (
                   renderPart(message, part, message.parts.indexOf(part), isLatest)
                 ),
@@ -554,7 +555,7 @@ export function MessageList({
             (attachment) => attachment.kind === "audio" && text?.type === "text" && attachment.transcript === text.text,
           );
           return (
-            <div key={message.id} className="flex justify-end">
+            <div key={messageKey(message)} className="flex justify-end">
               <div className="flex max-w-[85%] flex-col items-end gap-1 animate-bubble-in-right">
                 {message.attachments
                   ?.filter((attachment) => !(spoken && attachment.uploadId === spoken.uploadId))
@@ -582,7 +583,7 @@ export function MessageList({
         const visible = message.parts.filter((part) => part.type !== "text" || part.text.trim().length > 0);
         if (visible.length === 0) {
           return isLatest && sending ? (
-            <div key={message.id} className="flex items-center gap-2 animate-fade-up" role="status" aria-label="Working on it">
+            <div key={messageKey(message)} className="flex items-center gap-2 animate-fade-up" role="status" aria-label="Working on it">
               <AssistantDot accent={accent} />
               <span className="flex gap-1" aria-hidden="true">
                 {[0, 160, 320].map((delay) => (
@@ -595,7 +596,7 @@ export function MessageList({
         }
 
         return (
-          <div key={message.id} className="space-y-2">
+          <div key={messageKey(message)} className="space-y-2">
             {message.parts.map((part, index) => renderPart(message, part, index, isLatest))}
           </div>
         );

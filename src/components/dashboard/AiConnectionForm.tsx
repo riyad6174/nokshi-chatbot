@@ -17,6 +17,7 @@ type Props = {
     baseUrl: string;
     model: string;
     effort: string;
+    fallbackModel: string;
     keySource: "dashboard" | "environment" | "none";
     keyLast4: string;
     keyUnreadable: boolean;
@@ -29,6 +30,7 @@ export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
   const [baseUrl, setBaseUrl] = useState(initial.baseUrl);
   const [model, setModel] = useState(initial.model);
   const [effort, setEffort] = useState(initial.effort);
+  const [fallbackModel, setFallbackModel] = useState(initial.fallbackModel);
   const [testResult, testAction, testing] = useActionState<ConnectionTestResult | null, FormData>(
     testAiConnectionAction,
     null,
@@ -150,6 +152,26 @@ export function AiConnectionForm({ presets, effortLevels, initial }: Props) {
           {testResult?.models.length
             ? `${testResult.models.length} chat models loaded. Pick one from the list.`
             : "Test the connection to load the models your key can use."}
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor="ai-fallback-model" className={labelClass}>
+          Backup model (optional)
+        </label>
+        <PickOrType
+          id="ai-fallback-model"
+          name="fallbackModel"
+          mono
+          value={fallbackModel}
+          onChange={setFallbackModel}
+          options={(testResult?.models ?? []).map((id) => ({ id }))}
+          placeholder={preset.fallbackModel || "none"}
+          className={inputClass}
+        />
+        <p className="mt-1 text-[10px] leading-relaxed text-stone-400">
+          Used when the main model is out of quota or busy, so replies keep coming.
+          {preset.fallbackModel ? ` Blank uses ${preset.fallbackModel}.` : ""}
         </p>
       </div>
 

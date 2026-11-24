@@ -147,6 +147,8 @@ export type ChatMessage = {
   attachments?: AttachmentData[];
   senderName?: string;
   createdAt: string;
+  /** Client only: the on-screen key, kept when a temporary id is swapped for the server's. */
+  localKey?: string;
 };
 
 export type SuggestedTopic = { label: string; prompt: string };

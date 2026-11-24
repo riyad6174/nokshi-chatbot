@@ -21,38 +21,31 @@ async function submit(page: Page, button: string) {
   await page.waitForLoadState("networkidle");
 }
 
-test("AI Sales & Engagement: apply an industry preset, customise, preview, then restore", async ({ browser }) => {
+test("AI Sales & Engagement: language and assistant role are saved; advanced sections stay hidden", async ({ browser }) => {
   test.slow();
   const admin = await adminPage(browser);
   await admin.getByRole("navigation", { name: "Admin" }).getByRole("link", { name: "AI Sales & Engagement" }).click();
   await expect(admin.getByRole("heading", { name: "AI Sales & Engagement" })).toBeVisible();
 
-  await admin.getByLabel("Industry").selectOption("fashion");
-  await submit(admin, "Apply preset");
-  await expect(admin.getByText(/Current: Fashion & apparel/)).toBeVisible();
-  await expect(admin.getByLabel("Acts as")).toHaveValue("a friendly personal stylist");
+  // Simplified for now: presets, recommendation rules, proactive engagement and feature switches are hidden.
+  await expect(admin.getByLabel("Industry")).toHaveCount(0);
+  await expect(admin.getByText(/Turned off for now/)).toBeVisible();
 
-  await admin.getByLabel("Acts as").fill("Mina, your personal stylist");
+  const role = admin.getByLabel("Acts as");
+  const originalRole = await role.inputValue();
+  await admin.getByLabel(/Bangla \(বাংলা\)/).check();
+  await role.fill("Mina, your personal stylist");
   await submit(admin, "Save sales settings");
   await admin.reload();
   await expect(admin.getByLabel("Acts as")).toHaveValue("Mina, your personal stylist");
+  await expect(admin.getByLabel(/Bangla \(বাংলা\)/)).toBeChecked();
 
-  // A bad relationship line is rejected with a clear message, and nothing is saved.
-  await admin.getByLabel(/Product relationships/).fill("Shirts Pants");
+  // Restore, so the other journeys run with the default language and role.
+  await admin.getByLabel(/Match the customer/).check();
+  await admin.getByLabel("Acts as").fill(originalRole);
   await submit(admin, "Save sales settings");
-  await expect(admin.getByText(/Relationship line 1/)).toBeVisible();
   await admin.reload();
-  await expect(admin.getByLabel(/Product relationships/)).toHaveValue(/Shirts -> Pants/);
-
-  // Preview recommendations with the saved settings.
-  await admin.getByLabel("Product", { exact: true }).selectOption({ index: 1 });
-  await admin.getByRole("button", { name: "Preview" }).click();
-  await expect(admin.getByRole("heading", { name: "Test recommendations" })).toBeVisible();
-
-  // Back to the general preset so the shopping journey isn't affected by proactive messages.
-  await admin.getByLabel("Industry").selectOption("general");
-  await submit(admin, "Apply preset");
-  await expect(admin.getByText(/Current: General store/)).toBeVisible();
+  await expect(admin.getByLabel(/Match the customer/)).toBeChecked();
   await admin.context().close();
 });
 

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { addItem } from "@/modules/cart/cart.service";
 import { prisma } from "@/lib/db/prisma";
 import { isObjectId } from "@/lib/db/ids";
+import { parseOptions, sizeCode } from "@/modules/catalog/product.service";
 import { cartCompact, cartErrorToResult, failure, productIdAtPosition, productIdByName, success } from "@/modules/ai/tools/helpers";
 import type { ToolDefinition } from "@/modules/ai/tools/types";
 
@@ -17,13 +18,22 @@ const schema = z.object({
   quantity: z.number().int().min(1).max(99).default(1),
 });
 
-/** A variant id from its title, matched loosely ("silver" -> "Silver / Tan leather"). */
+/**
+ * A variant id from what the customer called it: its name ("Medium", "silver" -> "Silver / Tan
+ * leather"), a size code or word ("M" = "Medium"), or an option value. Null unless exactly one fits.
+ */
 async function variantIdByTitle(productId: string, title: string): Promise<string | null> {
   if (!isObjectId(productId)) return null;
-  const variants = await prisma.productVariant.findMany({ where: { productId }, select: { id: true, title: true } });
-  const wanted = title.trim().toLowerCase();
+  const variants = await prisma.productVariant.findMany({ where: { productId }, select: { id: true, title: true, options: true } });
+  const wanted = title.trim().toLowerCase().replace(/\s+size$|^size\s+/, "");
   const exact = variants.find((variant) => variant.title.toLowerCase() === wanted);
   if (exact) return exact.id;
+  // Same size or option: "M" <-> "Medium", "medium" <-> size "M".
+  const same = variants.filter((variant) => {
+    const values = [variant.title, ...Object.values(parseOptions(variant.options))].map((value) => value.toLowerCase());
+    return values.some((value) => sizeCode(value) === sizeCode(wanted));
+  });
+  if (same.length === 1) return same[0]!.id;
   const partial = variants.filter((variant) => variant.title.toLowerCase().includes(wanted) || wanted.includes(variant.title.toLowerCase()));
   return partial.length === 1 ? partial[0]!.id : null;
 }
