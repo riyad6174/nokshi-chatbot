@@ -60,6 +60,8 @@ export async function appendMessage(input: {
   parts?: ChatPart[];
   attachments?: MessageAttachment[];
   senderName?: string;
+  /** Live voice reply id from the browser (links the reply's usage reports). */
+  replyKey?: string;
 }) {
   const parts = input.parts ?? (input.content ? [{ type: "text" as const, text: input.content }] : []);
   const structured =
@@ -73,6 +75,7 @@ export async function appendMessage(input: {
       structuredContent: structured,
       attachments: input.attachments ?? [],
       senderName: input.senderName ?? "",
+      ...(input.replyKey ? { replyKey: input.replyKey } : {}),
     },
   });
 

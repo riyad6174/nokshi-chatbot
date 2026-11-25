@@ -102,6 +102,8 @@ async function runTurn(input: TurnInput): Promise<void> {
   let partialText = "";
   const partialParts: ChatPart[] = [];
   let persisted = false;
+  /** The assistant message this turn saved, to tie its usage rows to it. */
+  let replyMessageId: string | null = null;
   const persistInterrupted = async () => {
     if (persisted || (!partialText.trim() && partialParts.length === 0)) return;
     persisted = true;
@@ -254,6 +256,7 @@ async function runTurn(input: TurnInput): Promise<void> {
           content: event.content,
           parts: event.parts,
         });
+        replyMessageId = stored.id;
         send("message.completed", { messageId: stored.id });
       }
     }
@@ -277,14 +280,24 @@ async function runTurn(input: TurnInput): Promise<void> {
       });
     }
     const handedOff = toolLog.some((entry) => entry.name === "request_human" && entry.ok);
-    await recordAiTurn({
+    const turnLogId = await recordAiTurn({
       ...turnLog,
       outcome: handedOff ? "handoff" : missed ? "missed" : "answered",
       latencyMs: Date.now() - turnLog.started,
       firstTokenMs,
       toolLog,
+      messageId: replyMessageId,
       ...usageLogFields(),
     });
+    // Each model request of this turn, tied to the reply it produced (inbox token observability).
+    if (replyMessageId) {
+      await prisma.aiUsageEvent
+        .updateMany({
+          where: { conversationId: conversation.id, eventKey: { startsWith: `${usageTurnId}:` } },
+          data: { messageId: replyMessageId, ...(turnLogId ? { turnLogId } : {}) },
+        })
+        .catch(() => undefined);
+    }
     // The request_human tool or the miss counter may have handed the chat off during this turn.
     await sendModeAndEvents(turnStarted);
   } catch (error) {

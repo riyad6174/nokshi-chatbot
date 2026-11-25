@@ -135,6 +135,30 @@ data: [DONE]
     expect(Date.now() - started).toBeLessThan(2000);
   });
 
+  it("sends the turn's context as a note before the latest message, keeping the system message unchanging", async () => {
+    let body: { messages: Array<{ role: string; content: string }> } = { messages: [] };
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return new Response("data: [DONE]\n\n", { status: 200 });
+    });
+    const config = { providerId: "gemini", kind: "openai-compatible" as const, baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "k", model: "gemini-3.8-flash", effort: "low" as const };
+    for await (const _event of streamCompletion({
+      config,
+      messages: [
+        { role: "system", content: "RULES", cache: true },
+        { role: "user", content: "earlier" },
+        { role: "system", content: "CURRENT CART: empty", inline: true },
+        { role: "user", content: "show bags" },
+      ],
+      tools: [],
+    })) void _event;
+    expect(body.messages.map((message) => message.role)).toEqual(["system", "user", "user", "user"]);
+    expect(body.messages[0]!.content).toBe("RULES");
+    expect(body.messages[2]!.content).toContain("[SHOP CONTEXT");
+    expect(body.messages[2]!.content).toContain("CURRENT CART: empty");
+    expect(body.messages[3]!.content).toBe("show bags");
+  });
+
   it("retries a rejected Gemini request once without the optional fields, and reports the reason", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {

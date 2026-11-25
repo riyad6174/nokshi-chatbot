@@ -165,6 +165,8 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
   const captureRef = useRef<{ source: MediaStreamAudioSourceNode; node: AudioWorkletNode; sink: GainNode } | null>(null);
   const playbackRef = useRef<{ nextTime: number; sources: Set<AudioBufferSourceNode> }>({ nextTime: 0, sources: new Set() });
   const replyRef = useRef<Reply | null>(null);
+  /** The latest reply's id, kept after it ends: its usage report can arrive just after. */
+  const lastReplyIdRef = useRef<string | null>(null);
   const lastSaidRef = useRef("");
   const userTextRef = useRef("");
   const userStartedAtRef = useRef(0);
@@ -297,6 +299,7 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
     if (!replyRef.current) {
       const id = `voice-${Date.now()}`;
       replyRef.current = { id, text: "", interrupted: false, muted: false };
+      lastReplyIdRef.current = id;
       callbacksRef.current.onReplyStart(id);
     }
     return replyRef.current;
@@ -315,6 +318,7 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
         role: "assistant",
         text: reply.text.trim(),
         interrupted: reply.interrupted,
+        replyKey: reply.id,
       });
       callbacksRef.current.onReplyDone(reply.id, saved.message);
     } catch {
@@ -426,6 +430,7 @@ export function useGeminiLiveVoice(callbacks: RealtimeCallbacks) {
         void postJson("/api/widget/voice/realtime/usage", {
           kind: "gemini",
           responseId: `${callIdRef.current}-${usageCountRef.current}`,
+          replyKey: replyRef.current?.id ?? lastReplyIdRef.current ?? undefined,
           model: modelRef.current,
           usage: message.usageMetadata,
         }).catch(() => undefined);

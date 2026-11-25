@@ -307,6 +307,8 @@ model Message {
   structuredContent String?
   attachments       MessageAttachment[]
   senderName        String              @default("")
+  // Live voice: the browser's id for the spoken reply, so its usage reports link to this message.
+  replyKey          String?
   createdAt         DateTime            @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -604,6 +606,8 @@ model AiTurnLog {
   userText       String          @default("")
   // Why a turn ended in "error" (the provider's own message), for diagnosing failures.
   errorReason    String?
+  // The assistant message this turn produced (for per-message observability).
+  messageId      String?  @db.ObjectId
   intent         String          @default("")
   at             DateTime        @default(now())
 
@@ -676,6 +680,8 @@ model AiUsageEvent {
   sessionId             String?  @db.ObjectId
   turnLogId             String?  @db.ObjectId
   messageId             String?  @db.ObjectId
+  // Live voice: the spoken reply this response belongs to (linked to its message once saved).
+  replyKey              String?
   // Stable idempotency key for retries (e.g. turn id + round, or realtime response id).
   eventKey              String   @unique
   // text | voice

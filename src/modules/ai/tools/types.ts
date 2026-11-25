@@ -11,6 +11,11 @@ export type ToolContext = {
   latestUserText?: string;
   /** The customer's last few messages, newest first (live voice: a request isn't lost behind a stray line). */
   recentUserTexts?: string[];
+  /**
+   * Cards already shown during the reply being generated (not saved yet), so "number 2" or "open its
+   * page" right after a search in the same turn finds what's on screen.
+   */
+  shownThisTurn?: ChatPart[];
   /** The customer said yes right after the assistant offered to connect them with a person. */
   acceptedPersonOffer?: boolean;
   /** Context for cost-saving caches: never reuse a canned answer mid-cart or mid-order. */

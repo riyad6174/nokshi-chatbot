@@ -362,6 +362,11 @@ export function rememberShownParts(conversationId: string, parts: ChatPart[]) {
   pendingParts.set(conversationId, entry);
 }
 
+/** The cards shown so far in the reply being spoken (without taking them). */
+export function peekShownParts(conversationId: string): ChatPart[] {
+  return [...(pendingParts.get(conversationId)?.parts ?? [])];
+}
+
 export function takeShownParts(conversationId: string): ChatPart[] {
   const entry = pendingParts.get(conversationId);
   pendingParts.delete(conversationId);

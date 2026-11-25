@@ -86,13 +86,9 @@ export function geminiFunctionDeclarations(enabledFeatures?: string | null) {
 }
 
 /** Extra rules for Gemini Live: the parts of a call that most often went wrong. */
-const GEMINI_CALL_RULES = `TOOLS ON A CALL (most important):
-- Whenever the customer asks to see, show, find or browse products ("দেখান", "দেখাও", "কি কি আছে", "show me", "do you have"), call search_products IN THIS SAME TURN, before you say anything about products. Never describe or promise products without calling it; the cards only appear on screen when you call it.
-- "I want to buy/order X" (with a size or colour): find it and call add_to_cart in this same turn, then move to the order. Don't show it and ask "এটি নিবেন?" when they already said they want it.
-- "Tell me about it" / "details বলেন" -> get_product_details (card) and offer "পুরো পেজটা খুলে দিবো?". "পেজটা খুলুন" / "take me to the page" / yes to that offer -> open_product_page ONLY (pass the name, productId or its number on screen), nothing else.
-- Product questions ("what's the difference", "which is better", features): compare_products or get_product_details, never search_knowledge (that's only for store policies like delivery and returns).
-- Adding, changing or ordering: call the tool first, then speak about the result. Never say something was added or ordered unless the tool said ok.
-- If you didn't clearly hear what they said, ask them once to repeat it; don't guess a product.`;
+// The rest of the call rules are in the shared instructions; this is the one that broke without
+// emphasis on a call (products described but never shown).
+const GEMINI_CALL_RULES = `TOOLS ON A CALL (most important): when they ask to see or find products ("দেখান", "কি কি আছে", "show me"), call search_products in this same turn before saying anything about them: cards only appear when you call it. Never describe or promise products, cart changes or orders without the tool's result. Product questions ("what's the difference", "which is better", features): look them up with compare_products or get_product_details first, never from memory.`;
 
 type SetupInput = {
   instructions: string;

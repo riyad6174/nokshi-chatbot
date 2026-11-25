@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { readWidgetSessionId } from "@/lib/auth/widget";
+import { prisma } from "@/lib/db/prisma";
 import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
 import { appendMessage, toChatMessage } from "@/modules/conversations/conversation.service";
@@ -18,6 +19,8 @@ const bodySchema = z.object({
   text: z.string().trim().max(4000),
   // The reply was cut off because the customer started talking.
   interrupted: z.boolean().default(false),
+  /** The browser's id of this spoken reply: its usage reports carry it too. */
+  replyKey: z.string().trim().min(1).max(100).optional(),
 });
 
 /**
@@ -37,7 +40,7 @@ export async function POST(request: NextRequest) {
 
   if (!liveVoiceActive(context.store)) return jsonError(403, "realtime_unavailable", "Live voice isn't available.");
 
-  const { role, text, interrupted } = parsed.data;
+  const { role, text, interrupted, replyKey } = parsed.data;
   if (role === "user") {
     if (!text) return jsonOk({ message: null });
     const message = await appendMessage({ conversationId: context.conversationId, role: "user", content: text });
@@ -54,7 +57,14 @@ export async function POST(request: NextRequest) {
     role: "assistant",
     content,
     parts: [...(text ? [{ type: "text" as const, text: interrupted ? `${text} …` : text }] : []), ...parts],
+    replyKey,
   });
+  // Usage reports that arrived before this reply was saved: tie them to it.
+  if (replyKey) {
+    await prisma.aiUsageEvent
+      .updateMany({ where: { conversationId: context.conversationId, replyKey, messageId: null }, data: { messageId: message.id } })
+      .catch(() => undefined);
+  }
   await recordTurnOutcome({
     storeId: context.storeId,
     conversationId: context.conversationId,

@@ -85,6 +85,28 @@ export async function requireActiveCart(ctx: ToolContext) {
   return cart;
 }
 
+/**
+ * The cart line a tool means: its itemId when that's in the cart; otherwise the line whose product
+ * (and version) matches `product` / `variant` by name; otherwise, with a single line in the cart, that
+ * line ("remove it"). Ids are long and easy to mis-copy, and a failed call costs another model round.
+ */
+export async function resolveCartItemId(
+  ctx: ToolContext,
+  input: { itemId?: string | null; product?: string | null; variant?: string | null },
+): Promise<string | null> {
+  const cart = await getCartForTool(ctx);
+  if (input.itemId && cart.items.some((item) => item.itemId === input.itemId)) return input.itemId;
+  const wanted = input.product?.trim().toLowerCase();
+  if (wanted) {
+    const byName = cart.items.filter((item) => item.name.toLowerCase().includes(wanted) || wanted.includes(item.name.toLowerCase()));
+    const variant = input.variant?.trim().toLowerCase();
+    const narrowed = variant ? byName.filter((item) => (item.variantTitle ?? "").toLowerCase().includes(variant)) : byName;
+    if (narrowed.length === 1) return narrowed[0]!.itemId;
+    if (byName.length === 1) return byName[0]!.itemId;
+  }
+  return cart.items.length === 1 ? cart.items[0]!.itemId : null;
+}
+
 // Lookup errors mean a wrong id, not a sold-out product: say so, so the assistant retries instead
 // of telling the customer it's out of stock.
 const LOOKUP_ERRORS = new Set(["product_not_found", "variant_not_found"]);
@@ -154,8 +176,8 @@ async function recentParts(conversationId: string): Promise<ChatPart[][]> {
  * The product being talked about: the latest single-product card (details) or product page opened
  * in this conversation, so "open its page" / "this one" works without the model repeating a name.
  */
-export async function focusedProductId(conversationId: string, storeId: string): Promise<string | null> {
-  for (const parts of await recentParts(conversationId)) {
+export async function focusedProductId(conversationId: string, storeId: string, shownThisTurn: ChatPart[] = []): Promise<string | null> {
+  for (const parts of [shownThisTurn, ...(await recentParts(conversationId))]) {
     for (const part of [...parts].reverse()) {
       if (part.type === "product_list" && part.products.length === 1) return part.products[0]!.id;
       if (part.type === "navigate" && part.url.startsWith("/products/")) {
@@ -172,7 +194,10 @@ export async function focusedProductId(conversationId: string, storeId: string):
  * The product at a 1-based position of the latest product list shown in this conversation ("add the
  * second one"), so a number the customer said doesn't depend on the model copying the right id.
  */
-export async function productIdAtPosition(conversationId: string, position: number): Promise<string | null> {
+export async function productIdAtPosition(conversationId: string, position: number, shownThisTurn: ChatPart[] = []): Promise<string | null> {
+  // A list shown earlier in this same reply (not saved yet) is what's on screen now.
+  const current = [...shownThisTurn].reverse().find((part) => part.type === "product_list");
+  if (current && current.type === "product_list") return current.products[position - 1]?.id ?? null;
   const rows = await prisma.message.findMany({
     where: { conversationId, role: { in: ["assistant", "event"] } },
     orderBy: { createdAt: "desc" },

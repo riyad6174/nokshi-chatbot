@@ -142,3 +142,61 @@ export function normalizeAnthropicUsage(raw: unknown): NormalizedUsage | null {
     cacheWriteInputTokens: cacheWrite,
   });
 }
+
+/** One request's tokens split by kind, for the inbox observability report. */
+export type UsageBreakdown = {
+  /** Uncached input, text part. */
+  inputText: number;
+  /** Uncached input, audio part (live voice). */
+  inputAudio: number;
+  /** Cached input (all modalities). */
+  cached: number;
+  /** Output incl. thinking. */
+  output: number;
+  /** Audio part of the output (spoken reply). */
+  outputAudio: number;
+  /** Thinking part of the output. */
+  thinking: number;
+};
+
+function modalityTotal(details: unknown, modality: string): number {
+  if (!Array.isArray(details)) return 0;
+  return details.reduce((sum, entry) => {
+    const item = record(entry);
+    return sum + (item.modality === modality ? tokenCount(item.tokenCount) : 0);
+  }, 0);
+}
+
+/**
+ * Splits a stored usage row into text/audio/cached/output/thinking using its raw provider payload
+ * (Gemini `usageMetadata` by modality, or OpenAI `*_token_details`). Rows without audio detail are all text.
+ */
+export function usageBreakdown(row: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningTokens: number; rawUsage?: string | null }): UsageBreakdown {
+  let raw: Record<string, unknown> = {};
+  try {
+    raw = record(JSON.parse(row.rawUsage || "{}"));
+  } catch {
+    raw = {};
+  }
+  let audioIn = 0;
+  let audioOut = 0;
+  if ("promptTokenCount" in raw || "promptTokensDetails" in raw) {
+    const promptAudio = modalityTotal(raw.promptTokensDetails, "AUDIO");
+    const cachedAudio = Math.min(promptAudio, modalityTotal(raw.cacheTokensDetails, "AUDIO"));
+    audioIn = promptAudio - cachedAudio;
+    audioOut = modalityTotal(raw.responseTokensDetails ?? raw.candidatesTokensDetails, "AUDIO");
+  } else if (Object.keys(raw).length > 0) {
+    const openAi = audioTokensFromOpenAiUsage(raw);
+    audioIn = openAi.audioInputTokens;
+    audioOut = openAi.audioOutputTokens;
+  }
+  const inputAudio = Math.min(audioIn, row.inputTokens);
+  return {
+    inputText: row.inputTokens - inputAudio,
+    inputAudio,
+    cached: row.cachedInputTokens,
+    output: row.outputTokens,
+    outputAudio: Math.min(audioOut, row.outputTokens),
+    thinking: Math.min(row.reasoningTokens, row.outputTokens),
+  };
+}

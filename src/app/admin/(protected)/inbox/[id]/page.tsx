@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdminBanner } from "@/components/dashboard/AdminBanner";
@@ -5,111 +6,26 @@ import { AgentReplyBox } from "@/components/dashboard/AgentReplyBox";
 import { AutoRefresh } from "@/components/dashboard/AutoRefresh";
 import { ConversationScroll } from "@/components/dashboard/ConversationScroll";
 import { ConversationStatusBadge } from "@/components/dashboard/ConversationStatusBadge";
+import { ConversationTimeline, type TimelineSession } from "@/components/dashboard/inbox/ConversationTimeline";
+import { formatCost, formatTokens } from "@/components/dashboard/inbox/format";
+import { OBSERVABILITY_COOKIE } from "@/components/dashboard/inbox/observability-cookie";
+import { ObservabilityPanel } from "@/components/dashboard/inbox/ObservabilityPanel";
+import { ObservabilityToggle } from "@/components/dashboard/inbox/ObservabilityToggle";
 import { closeAction, releaseAction, takeOverAction } from "@/app/admin/inbox-actions";
 import { requireAdmin } from "@/lib/auth/admin";
 import { prisma } from "@/lib/db/prisma";
 import { formatMinor } from "@/lib/money";
 import { getCartSummary } from "@/modules/cart/cart.service";
+import { loadConversationObservability, loadConversationSessions } from "@/modules/analytics/conversation-observability";
 import { getConversationUsage } from "@/modules/analytics/usage.service";
 import { getConversationDetail, toChatMessage } from "@/modules/conversations/conversation.service";
 import { markRead } from "@/modules/conversations/handoff.service";
-import { conversationDigest } from "@/modules/conversations/summary.service";
 import { STATUS_LABELS } from "@/modules/orders/order.service";
 import { getAdminPageStore } from "@/modules/stores/admin-store";
-import type { ChatMessage, ChatPart } from "@/types/chat";
-import { formatDateTime, formatMessageTime } from "@/lib/dates";
+import { parseJsonObject } from "@/modules/stores/store.service";
+import { formatDateTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
-
-function describePart(part: ChatPart): string | null {
-  switch (part.type) {
-    case "product_list":
-      return `Showed products: ${part.products.map((product) => product.name).join(", ")}`;
-    case "cart_summary":
-      return `Cart: ${part.cart.items.map((item) => `${item.quantity}× ${item.name}`).join(", ") || "empty"} (${formatMinor(part.cart.subtotalMinor, part.cart.currency)})`;
-    case "checkout_action":
-      return "Offered the checkout button";
-    case "details_form":
-      return "Asked for delivery details";
-    case "refine_options":
-      return `Offered filters: ${part.options.facets.map((facet) => `${facet.name} (${facet.values.join(", ")})`).join("; ")}`;
-    case "order_status":
-      return part.orders.map((order) => `Order ${order.orderNumber}: ${order.statusLabel}`).join("; ");
-    case "contact_form":
-      return "Asked the customer to check their contact details";
-    case "order_confirmation":
-      return `Order summary to confirm (cash on delivery): ${formatMinor(part.confirmation.totalMinor, part.confirmation.currency)} to ${part.confirmation.customer.name}, ${part.confirmation.customer.phone}`;
-    case "comparison":
-      return `Compared: ${part.products.map((product) => product.name).join(" vs ")}`;
-    case "suggestion_actions":
-      return "(Proactive suggestion)";
-    default:
-      return null;
-  }
-}
-
-function Bubble({ message }: { message: ChatMessage }) {
-  if (message.role === "event") {
-    const text = message.parts.find((part) => part.type === "text");
-    return (
-      <div className="my-2 flex justify-center">
-        <span className="rounded-full bg-stone-100 px-3 py-1 text-[10.5px] text-stone-500">
-          {text && text.type === "text" ? text.text : "Event"}
-        </span>
-      </div>
-    );
-  }
-  const mine = message.role === "agent";
-  const customer = message.role === "user";
-  return (
-    <div className={`flex ${customer ? "justify-start" : "justify-end"}`}>
-      <div
-        className={`max-w-[80%] rounded-2xl px-3 py-2 text-[12.5px] leading-relaxed ${
-          customer ? "bg-stone-100 text-stone-900" : mine ? "bg-stone-900 text-white" : "bg-emerald-50 text-emerald-950"
-        }`}
-      >
-        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-60">
-          {customer ? "Customer" : mine ? message.senderName || "Agent" : "AI assistant"} ·{" "}
-          <time dateTime={new Date(message.createdAt).toISOString()} title={formatDateTime(message.createdAt)}>
-            {formatMessageTime(message.createdAt)}
-          </time>
-        </p>
-        {message.parts.map((part, index) =>
-          part.type === "text" ? (
-            <p key={index} className="whitespace-pre-line">
-              {part.text}
-            </p>
-          ) : describePart(part) ? (
-            <p key={index} className="mt-1 text-[11px] italic opacity-75">
-              {describePart(part)}
-            </p>
-          ) : null,
-        )}
-        {message.attachments?.map((attachment) => (
-          <div key={attachment.uploadId} className="mt-1.5">
-            {attachment.kind === "image" ? (
-              <a href={attachment.url} target="_blank" rel="noreferrer">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={attachment.url} alt={attachment.name} className="max-h-48 rounded-lg" />
-              </a>
-            ) : attachment.kind === "audio" ? (
-              <div>
-                <audio controls src={attachment.url} className="h-9 max-w-full" />
-                <p className="mt-0.5 text-[11px] opacity-75">
-                  {attachment.transcript ? `Transcript: “${attachment.transcript}”` : "No transcript (browser couldn't recognize the speech)."}
-                </p>
-              </div>
-            ) : (
-              <a href={attachment.url} className="underline underline-offset-2">
-                📎 {attachment.name}
-              </a>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export default async function InboxConversationPage({
   params,
@@ -127,12 +43,14 @@ export default async function InboxConversationPage({
   if (!conversation) notFound();
   await markRead(store.id, conversation.id);
 
-  const [cart, orders, digest, usage, gaps] = await Promise.all([
+  // "Show token usage" is remembered per admin in this browser.
+  const showUsage = (await cookies()).get(OBSERVABILITY_COOKIE)?.value === "1";
+  const timelineInput = { storeId: store.id, sessionId: conversation.session.id, messages: conversation.messages };
+
+  const [cart, orders, usage, gaps, observability, plainSessions] = await Promise.all([
     getCartSummary(conversation.session.id, store.id, store.currency),
     prisma.order.findMany({ where: { storeId: store.id, sessionId: conversation.session.id }, orderBy: { createdAt: "desc" }, take: 5 }),
-    // Lets an agent catch up quickly after a handoff.
-    conversationDigest(conversation.id).catch(() => ""),
-    getConversationUsage(store.id, conversation.id),
+    showUsage ? null : getConversationUsage(store.id, conversation.id),
     // Questions from this chat the assistant couldn't answer: teach them in Knowledge.
     prisma.unansweredQuestion.findMany({
       where: { storeId: store.id, conversationId: conversation.id, status: { in: ["new", "reviewing"] } },
@@ -140,7 +58,21 @@ export default async function InboxConversationPage({
       take: 5,
       select: { id: true, question: true, occurrences: true },
     }),
+    showUsage ? loadConversationObservability({ ...timelineInput, conversationId: conversation.id }) : null,
+    showUsage ? null : loadConversationSessions(timelineInput),
   ]);
+  const sessions: TimelineSession[] =
+    observability?.sessions ??
+    (plainSessions ?? []).map((session, index) => ({
+      index,
+      kind: session.kind,
+      start: new Date(session.start).toISOString(),
+      end: new Date(session.end).toISOString(),
+      durationMs: Math.max(0, session.end - session.start),
+      messageIds: session.messageIds,
+    }));
+  const theme = parseJsonObject(store.settings?.widgetTheme);
+  const accent = typeof theme.accent === "string" ? theme.accent : "#0f766e";
   const messages = conversation.messages.map(toChatMessage);
   const closed = conversation.status === "closed";
   const mine = conversation.status === "human" && conversation.assignedAdminId === admin.id;
@@ -149,9 +81,18 @@ export default async function InboxConversationPage({
     <div>
       <AutoRefresh intervalMs={3000} />
       <AdminBanner error={error} />
-      <Link href="/admin/inbox" className="text-[11.5px] text-stone-500 hover:text-stone-800">
-        ← Inbox
-      </Link>
+      <div className="flex items-center justify-between gap-2">
+        <Link href="/admin/inbox" className="text-[11.5px] text-stone-500 hover:text-stone-800">
+          ← Inbox
+        </Link>
+        <ObservabilityToggle on={showUsage} />
+      </div>
+
+      {observability ? (
+        <div className="mt-2">
+          <ObservabilityPanel data={observability} />
+        </div>
+      ) : null}
 
       <div className="mt-2 grid gap-4 lg:grid-cols-[1fr_260px]">
         <section className="flex h-[calc(100dvh-11rem)] min-h-[480px] flex-col overflow-hidden rounded-xl border border-stone-200 bg-white">
@@ -198,13 +139,20 @@ export default async function InboxConversationPage({
           ) : null}
 
           {/* min-h-0: the list scrolls inside the panel instead of being squeezed out by the reply box. */}
-          <ConversationScroll messageCount={messages.length} className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
+          {/* admin-light: the conversation keeps the widget's light look, so cards appear exactly as the customer saw them. */}
+          <ConversationScroll messageCount={messages.length} className="admin-light min-h-0 flex-1 overflow-y-auto px-4 py-3">
             {messages.length === 0 ? (
               <p className="py-10 text-center text-[12px] text-stone-500">
                 No messages in this chat yet. The customer opened the assistant but hasn&apos;t written anything.
               </p>
             ) : (
-              messages.map((message) => <Bubble key={message.id} message={message} />)
+              <ConversationTimeline
+                messages={messages}
+                accent={accent}
+                customer={{ name: conversation.customerName || null, visitorId: conversation.session.visitorId, phone: conversation.customerPhone || null }}
+                sessions={sessions}
+                observability={observability}
+              />
             )}
           </ConversationScroll>
 
@@ -212,24 +160,47 @@ export default async function InboxConversationPage({
         </section>
 
         <aside className="space-y-3 text-[11.5px]">
-          {digest ? (
-            <div className="rounded-xl border border-stone-200 bg-white p-4">
-              <h2 className="text-[12px] font-semibold text-stone-900">Summary</h2>
-              <ul className="mt-1 space-y-1 text-stone-600">
-                {digest.split("\n").map((line) => (
-                  <li key={line}>{line.replace(/^- /, "")}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
           <div className="rounded-xl border border-stone-200 bg-white p-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-[12px] font-semibold text-stone-900">AI usage</h2>
               <Link href="/admin/ai-usage" className="text-[10px] text-stone-500 underline-offset-2 hover:underline">
-                Details
+                All usage
               </Link>
             </div>
-            {usage ? (
+            {observability ? (
+              observability.totals.requests ? (
+                <>
+                  <p className="mt-1 text-[16px] font-semibold tabular-nums text-stone-900">
+                    {observability.totals.unpriced === observability.totals.requests ? "No price set" : formatCost(observability.totals.costMicros)}
+                  </p>
+                  <p className="mt-0.5 text-stone-500">
+                    {formatTokens(observability.totals.total)} tokens · {observability.totals.requests} request
+                    {observability.totals.requests === 1 ? "" : "s"}
+                  </p>
+                  <ul className="mt-2 space-y-1 border-t border-stone-100 pt-2">
+                    {observability.sessions.map((session) => (
+                      <li key={session.index} className="flex justify-between gap-2 tabular-nums">
+                        <a href={`#msg-${session.messageIds[0]}`} className="text-stone-600 hover:underline">
+                          Session {session.index + 1}
+                          {session.kind === "voice_call" ? " · 🎙" : ""}
+                        </a>
+                        <span className="text-right text-stone-700">
+                          {formatCost(session.totals.costMicros)}
+                          <span className="block text-[10px] text-stone-500">
+                            {formatTokens(session.totals.total)} tok · {session.totals.requests} req
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {observability.totals.unpriced > 0 ? (
+                    <p className="mt-1 text-[10.5px] text-amber-700">{observability.totals.unpriced} unpriced · add model pricing</p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="mt-1 text-stone-500">No AI usage recorded</p>
+              )
+            ) : usage ? (
               <>
                 <p className="mt-1 text-[16px] font-semibold tabular-nums text-stone-900">
                   ${(usage.costMicros / 1_000_000).toFixed(4)}
@@ -243,6 +214,7 @@ export default async function InboxConversationPage({
                     {usage.unpricedEventCount} unpriced · add model pricing
                   </p>
                 ) : null}
+                <p className="mt-1 text-[10.5px] text-stone-500">Turn on “Show token usage” for every request.</p>
               </>
             ) : (
               <p className="mt-1 text-stone-500">No AI usage recorded</p>
@@ -315,6 +287,7 @@ export default async function InboxConversationPage({
             <p>Language: {conversation.session.locale}</p>
             <p>Started: {formatDateTime(conversation.createdAt)}</p>
             <p>Messages: {messages.length}</p>
+            <p>Sessions: {sessions.length}</p>
           </div>
         </aside>
       </div>

@@ -22,11 +22,13 @@ export async function recordAiTurn(input: {
   intent?: string;
   /** Why the turn failed (outcome "error"). */
   errorReason?: string;
+  /** The assistant message this turn produced. */
+  messageId?: string | null;
   usage?: NormalizedUsage;
   costMicros?: number;
   pricingStatus?: "priced" | "unpriced" | "mixed";
   usageEventCount?: number;
-}): Promise<void> {
+}): Promise<string | null> {
   try {
     const toolCalls = (input.toolLog ?? []).slice(0, 30).map((entry) => ({
       name: entry.name.slice(0, 60),
@@ -34,7 +36,7 @@ export async function recordAiTurn(input: {
       code: entry.code.slice(0, 60),
       ms: Math.max(0, Math.round(entry.ms)),
     }));
-    await prisma.aiTurnLog.create({
+    const created = await prisma.aiTurnLog.create({
       data: {
         storeId: input.storeId,
         conversationId: input.conversationId,
@@ -54,6 +56,7 @@ export async function recordAiTurn(input: {
         usageEventCount: input.usageEventCount,
         outcome: input.outcome,
         ...(input.errorReason ? { errorReason: input.errorReason.slice(0, 500) } : {}),
+        ...(input.messageId ? { messageId: input.messageId } : {}),
         latencyMs: Math.max(0, Math.round(input.latencyMs)),
         firstTokenMs: input.firstTokenMs == null ? null : Math.max(0, Math.round(input.firstTokenMs)),
         toolCalls,
@@ -63,8 +66,10 @@ export async function recordAiTurn(input: {
       },
     });
     if (input.outcome === "error") logger.warn("ai.turn_error_recorded", { storeId: input.storeId });
+    return created.id;
   } catch (error) {
     logger.warn("ai.turn_log_failed", { error: error instanceof Error ? error.message : String(error) });
+    return null;
   }
 }
 

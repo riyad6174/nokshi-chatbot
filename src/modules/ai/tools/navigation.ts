@@ -45,13 +45,13 @@ export const openProductPageTool: ToolDefinition = {
     const input = productSchema.parse(args);
     const storeId = ctx.session.storeId;
     let productId = input.productId && isObjectId(input.productId) ? input.productId : null;
-    if (!productId && input.position) productId = await productIdAtPosition(ctx.session.conversationId, input.position);
+    if (!productId && input.position) productId = await productIdAtPosition(ctx.session.conversationId, input.position, ctx.shownThisTurn);
     if (!productId && input.product) {
       const matches = await productsMatchingName(storeId, input.product, resolveSalesConfig(ctx.session.store.settings).synonyms);
       if (matches.length === 1) productId = matches[0]!.id;
       else if (matches.length > 1) {
         // "the bag" with several bags: the one being talked about, if it's one of them.
-        const focused = await focusedProductId(ctx.session.conversationId, storeId);
+        const focused = await focusedProductId(ctx.session.conversationId, storeId, ctx.shownThisTurn);
         if (focused && matches.some((match) => match.id === focused)) productId = focused;
         else {
           return failure(
@@ -62,7 +62,7 @@ export const openProductPageTool: ToolDefinition = {
       }
     }
     // No name, id or number: the product being talked about.
-    if (!productId && !input.product && !input.position) productId = await focusedProductId(ctx.session.conversationId, storeId);
+    if (!productId && !input.product && !input.position) productId = await focusedProductId(ctx.session.conversationId, storeId, ctx.shownThisTurn);
     const product = productId
       ? await prisma.product.findFirst({
           where: { id: productId, storeId, status: "active" },

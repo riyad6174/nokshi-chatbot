@@ -110,17 +110,14 @@ export const searchProductsTool: ToolDefinition = {
           matched: selection.length > 0,
           count: selection.length,
           // Name, price and stock only: the cards show the rest, and the next turn's history lists
-          // the ids and versions of what's on screen. 24 full products cost ~3k tokens per round.
-          // On a live call there is no next-turn history, so the variants the customer may pick
-          // ("the second one in black") come with the result, in their shortest form.
+          // the ids and versions of what's on screen. 24 full products cost ~3k tokens per round
+          // (and on a live call every result stays in the context, billed again on every reply).
+          // Versions aren't needed here: add_to_cart takes a version or size by name ("Olive", "M").
           products: selection.map((product) => ({
             id: product.id,
             name: product.name,
             price: priceLabel(product.priceMinor, product.currency),
             available: product.available,
-            ...(ctx.channel === "voice" && product.variants.length > 1
-              ? { variants: product.variants.map((variant) => ({ id: variant.id, title: variant.title, available: variant.available })) }
-              : {}),
           })),
           storeCategories: categories,
           note:

@@ -535,7 +535,7 @@
 }
 
 /* Page titles: modern sans, tight tracking, ivory ink that fades into champagne. */
-.admin-main h1.font-serif {
+.admin-main h1.font-serif:not(.admin-light *) {
   font-family: var(--font-sans);
   font-size: 1.75rem;
   line-height: 2.15rem;
@@ -548,7 +548,7 @@
 }
 
 /* Glass cards. */
-.admin-main :is(.rounded-xl, .rounded-2xl, .rounded-3xl).bg-white {
+.admin-main :is(.rounded-xl, .rounded-2xl, .rounded-3xl).bg-white:not(.admin-light *) {
   border-radius: 1.15rem;
   background-color: var(--admin-surface);
   border-color: var(--admin-line);
@@ -561,18 +561,18 @@
 }
 
 /* Cards nested in cards: no second blur, just a slightly brighter pane. */
-.admin-main :is(.rounded-xl, .rounded-2xl, .rounded-3xl).bg-white :is(.rounded-xl, .rounded-2xl, .rounded-3xl).bg-white {
+.admin-main :is(.rounded-xl, .rounded-2xl, .rounded-3xl).bg-white :is(.rounded-xl, .rounded-2xl, .rounded-3xl).bg-white:not(.admin-light *) {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   background-color: var(--admin-surface-2);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
 
-.admin-main a:is(.rounded-xl, .rounded-2xl).bg-white {
+.admin-main a:is(.rounded-xl, .rounded-2xl).bg-white:not(.admin-light *) {
   transition: transform 220ms ease, box-shadow 220ms ease, background-color 220ms ease;
 }
 
-.admin-main a:is(.rounded-xl, .rounded-2xl).bg-white:hover {
+.admin-main a:is(.rounded-xl, .rounded-2xl).bg-white:hover:not(.admin-light *) {
   transform: translateY(-2px);
   background-color: var(--admin-surface-2);
   box-shadow:
@@ -582,7 +582,7 @@
 }
 
 /* Primary actions: warm ivory, jet-black label — the one bright thing on the page. */
-.admin-main :is(.bg-stone-900, .bg-stone-800) {
+.admin-main :is(.bg-stone-900, .bg-stone-800):not(.admin-light *) {
   background-color: #ece5d6;
   background-image: linear-gradient(135deg, #f7f2e7 0%, #e6dcc6 55%, #cdb890 130%);
   color: #15110a;
@@ -592,12 +592,12 @@
   transition: transform 160ms ease, box-shadow 220ms ease, filter 200ms ease;
 }
 
-.admin-main :is(.bg-stone-900, .bg-stone-800).text-white,
-.admin-main :is(.bg-stone-900, .bg-stone-800) .text-white {
+.admin-main :is(.bg-stone-900, .bg-stone-800).text-white:not(.admin-light *),
+.admin-main :is(.bg-stone-900, .bg-stone-800) .text-white:not(.admin-light *) {
   color: #15110a;
 }
 
-.admin-main :is(a, button):is(.bg-stone-900, .bg-stone-800):hover {
+.admin-main :is(a, button):is(.bg-stone-900, .bg-stone-800):hover:not(.admin-light *) {
   filter: brightness(1.05);
   transform: translateY(-1px);
   box-shadow:
@@ -605,12 +605,12 @@
     0 16px 34px -16px rgb(0 0 0 / 0.95);
 }
 
-.admin-main :is(a, button):is(.bg-stone-900, .bg-stone-800):active {
+.admin-main :is(a, button):is(.bg-stone-900, .bg-stone-800):active:not(.admin-light *) {
   transform: translateY(0);
 }
 
 /* Secondary buttons. */
-.admin-main :is(a, button).border-stone-300 {
+.admin-main :is(a, button).border-stone-300:not(.admin-light *) {
   background-color: var(--admin-surface);
   border-color: var(--admin-line-strong);
   color: var(--admin-ink);
@@ -618,7 +618,7 @@
   transition: transform 160ms ease, background-color 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
-.admin-main :is(a, button).border-stone-300:hover {
+.admin-main :is(a, button).border-stone-300:hover:not(.admin-light *) {
   background-color: var(--admin-surface-2);
   border-color: rgb(216 184 120 / 0.35);
   transform: translateY(-1px);
@@ -626,14 +626,14 @@
 }
 
 /* Inactive filter pills. */
-.admin-main a.rounded-full.bg-white {
+.admin-main a.rounded-full.bg-white:not(.admin-light *) {
   background-color: var(--admin-surface);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
 
 /* Form fields. */
-.admin-main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="color"]):not([type="file"]), select, textarea) {
+.admin-main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="color"]):not([type="file"]), select, textarea):not(.admin-light *) {
   border-radius: 0.7rem;
   border-color: var(--admin-line);
   background-color: rgb(255 255 255 / 0.035);
@@ -641,280 +641,280 @@
   transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
 }
 
-.admin-main :is(input, select, textarea)::placeholder {
+.admin-main :is(input, select, textarea):not(.admin-light *)::placeholder {
   color: var(--admin-faint);
 }
 
-.admin-main :is(input, select, textarea):hover:not(:focus):not(:disabled) {
+.admin-main :is(input, select, textarea):hover:not(:focus):not(:disabled):not(.admin-light *) {
   border-color: var(--admin-line-strong);
 }
 
-.admin-main :is(input, select, textarea):focus {
+.admin-main :is(input, select, textarea):focus:not(.admin-light *) {
   outline: none;
   border-color: rgb(216 184 120 / 0.55);
   background-color: rgb(255 255 255 / 0.06);
   box-shadow: 0 0 0 4px rgb(216 184 120 / 0.1);
 }
 
-.admin-main select option {
+.admin-main select option:not(.admin-light *) {
   background-color: #121214;
   color: var(--admin-ink);
 }
 
-.admin-main :is(input[type="checkbox"], input[type="radio"]) {
+.admin-main :is(input[type="checkbox"], input[type="radio"]):not(.admin-light *) {
   accent-color: var(--admin-gold);
 }
 
 /* Tables. */
-.admin-main table thead {
+.admin-main table thead:not(.admin-light *) {
   background-color: rgb(255 255 255 / 0.03);
   border-color: var(--admin-line);
 }
 
-.admin-main table thead th {
+.admin-main table thead th:not(.admin-light *) {
   color: var(--admin-muted);
 }
 
-.admin-main table tbody tr {
+.admin-main table tbody tr:not(.admin-light *) {
   transition: background-color 150ms ease;
 }
 
-.admin-main table tbody tr:hover {
+.admin-main table tbody tr:hover:not(.admin-light *) {
   background-color: rgb(255 255 255 / 0.035);
 }
 
-.admin-main .divide-stone-100 > :not([hidden]) ~ :not([hidden]),
-.admin-main .divide-stone-200 > :not([hidden]) ~ :not([hidden]) {
+.admin-main .divide-stone-100 > :not([hidden]) ~ :not([hidden]):not(.admin-light *),
+.admin-main .divide-stone-200 > :not([hidden]) ~ :not([hidden]):not(.admin-light *) {
   border-color: var(--admin-line);
 }
 
 /* ---- Surfaces, borders and ink from the pages' light utilities ---- */
 
-.admin-main .bg-white {
+.admin-main .bg-white:not(.admin-light *) {
   background-color: var(--admin-surface);
 }
-.admin-main .bg-white\/50,
-.admin-main .bg-white\/60,
-.admin-main .bg-white\/70,
-.admin-main .bg-white\/80,
-.admin-main .bg-white\/85 {
+.admin-main .bg-white\/50:not(.admin-light *),
+.admin-main .bg-white\/60:not(.admin-light *),
+.admin-main .bg-white\/70:not(.admin-light *),
+.admin-main .bg-white\/80:not(.admin-light *),
+.admin-main .bg-white\/85:not(.admin-light *) {
   background-color: var(--admin-surface);
 }
 
 /* Option cards (radio choices): the chosen one gets the champagne accent, readable on the dark theme. */
-.admin-main .admin-choice {
+.admin-main .admin-choice:not(.admin-light *) {
   transition: border-color 0.15s, background-color 0.15s;
 }
-.admin-main .admin-choice input {
+.admin-main .admin-choice input:not(.admin-light *) {
   accent-color: var(--admin-gold);
 }
-.admin-main .admin-choice:hover {
+.admin-main .admin-choice:hover:not(.admin-light *) {
   background-color: rgb(255 255 255 / 0.04);
 }
-.admin-main .admin-choice:has(input:checked) {
+.admin-main .admin-choice:has(input:checked):not(.admin-light *) {
   border-color: var(--admin-gold);
   background-color: var(--admin-gold-soft);
 }
-.admin-main .admin-choice:has(input:checked) .admin-choice-title {
+.admin-main .admin-choice:has(input:checked) .admin-choice-title:not(.admin-light *) {
   color: var(--admin-gold-bright);
 }
-.admin-main .admin-choice:has(input:focus-visible) {
+.admin-main .admin-choice:has(input:focus-visible):not(.admin-light *) {
   outline: 2px solid var(--admin-gold);
   outline-offset: 2px;
 }
 
-.admin-main .bg-stone-50,
-.admin-main .bg-stone-50\/60 {
+.admin-main .bg-stone-50:not(.admin-light *),
+.admin-main .bg-stone-50\/60:not(.admin-light *) {
   background-color: rgb(255 255 255 / 0.035);
 }
-.admin-main .bg-stone-100,
-.admin-main .bg-stone-200 {
+.admin-main .bg-stone-100:not(.admin-light *),
+.admin-main .bg-stone-200:not(.admin-light *) {
   background-color: rgb(255 255 255 / 0.06);
 }
-.admin-main .bg-stone-200\/70 {
+.admin-main .bg-stone-200\/70:not(.admin-light *) {
   background-color: rgb(255 255 255 / 0.08);
 }
 
-.admin-main .hover\:bg-stone-50:hover,
-.admin-main .hover\:bg-stone-100:hover,
-.admin-main .hover\:bg-white\/80:hover,
-.admin-main .hover\:bg-white:hover {
+.admin-main .hover\:bg-stone-50:hover:not(.admin-light *),
+.admin-main .hover\:bg-stone-100:hover:not(.admin-light *),
+.admin-main .hover\:bg-white\/80:hover:not(.admin-light *),
+.admin-main .hover\:bg-white:hover:not(.admin-light *) {
   background-color: rgb(255 255 255 / 0.06);
 }
-.admin-main .hover\:bg-stone-900\/\[0\.04\]:hover,
-.admin-main .bg-stone-900\/\[0\.04\],
-.admin-main .bg-stone-900\/5 {
+.admin-main .hover\:bg-stone-900\/\[0\.04\]:hover:not(.admin-light *),
+.admin-main .bg-stone-900\/\[0\.04\]:not(.admin-light *),
+.admin-main .bg-stone-900\/5:not(.admin-light *) {
   background-color: rgb(255 255 255 / 0.06);
 }
 
-.admin-main .border-stone-100,
-.admin-main .border-stone-200,
-.admin-main .border-stone-200\/60,
-.admin-main .border-stone-200\/80,
-.admin-main .border-stone-300,
-.admin-main .border-stone-300\/80 {
+.admin-main .border-stone-100:not(.admin-light *),
+.admin-main .border-stone-200:not(.admin-light *),
+.admin-main .border-stone-200\/60:not(.admin-light *),
+.admin-main .border-stone-200\/80:not(.admin-light *),
+.admin-main .border-stone-300:not(.admin-light *),
+.admin-main .border-stone-300\/80:not(.admin-light *) {
   border-color: var(--admin-line);
 }
-.admin-main .border-stone-500,
-.admin-main .border-stone-900 {
+.admin-main .border-stone-500:not(.admin-light *),
+.admin-main .border-stone-900:not(.admin-light *) {
   border-color: var(--admin-line-strong);
 }
 
-.admin-main .ring-stone-200,
-.admin-main .ring-stone-300 {
+.admin-main .ring-stone-200:not(.admin-light *),
+.admin-main .ring-stone-300:not(.admin-light *) {
   --tw-ring-color: var(--admin-line);
 }
-.admin-main .ring-stone-500\/10 {
+.admin-main .ring-stone-500\/10:not(.admin-light *) {
   --tw-ring-color: rgb(255 255 255 / 0.08);
 }
-.admin-main .ring-white {
+.admin-main .ring-white:not(.admin-light *) {
   --tw-ring-color: #0b0b0d;
 }
 
 /* Ink. */
-.admin-main .text-stone-900 { color: #f7f5ef; }
-.admin-main .text-stone-800 { color: #ece8df; }
-.admin-main .text-stone-700 { color: #d9d4c9; }
-.admin-main .text-stone-600 { color: #c8c2b7; }
-.admin-main .text-stone-500 { color: var(--admin-muted); }
-.admin-main .text-stone-400 { color: var(--admin-faint); }
-.admin-main .text-stone-300 { color: #cfc9be; }
-.admin-main .text-stone-200 { color: #e3ded4; }
-.admin-main .text-stone-100 { color: #f2eee5; }
+.admin-main .text-stone-900:not(.admin-light *) { color: #f7f5ef; }
+.admin-main .text-stone-800:not(.admin-light *) { color: #ece8df; }
+.admin-main .text-stone-700:not(.admin-light *) { color: #d9d4c9; }
+.admin-main .text-stone-600:not(.admin-light *) { color: #c8c2b7; }
+.admin-main .text-stone-500:not(.admin-light *) { color: var(--admin-muted); }
+.admin-main .text-stone-400:not(.admin-light *) { color: var(--admin-faint); }
+.admin-main .text-stone-300:not(.admin-light *) { color: #cfc9be; }
+.admin-main .text-stone-200:not(.admin-light *) { color: #e3ded4; }
+.admin-main .text-stone-100:not(.admin-light *) { color: #f2eee5; }
 
-.admin-main .placeholder\:text-stone-400::placeholder,
-.admin-main .placeholder\:text-stone-500::placeholder {
+.admin-main .placeholder\:text-stone-400:not(.admin-light *)::placeholder,
+.admin-main .placeholder\:text-stone-500:not(.admin-light *)::placeholder {
   color: var(--admin-faint);
 }
 
 /* The accent used across the pages becomes champagne. */
-.admin-main :is(.text-teal-600, .text-teal-700, .text-teal-900) {
+.admin-main :is(.text-teal-600, .text-teal-700, .text-teal-900):not(.admin-light *) {
   color: var(--admin-gold);
 }
-.admin-main .text-teal-100 {
+.admin-main .text-teal-100:not(.admin-light *) {
   color: var(--admin-gold-bright);
 }
-.admin-main :is(.bg-teal-50, .bg-teal-500\/10) {
+.admin-main :is(.bg-teal-50, .bg-teal-500\/10):not(.admin-light *) {
   background-color: var(--admin-gold-soft);
 }
-.admin-main .hover\:bg-teal-50:hover {
+.admin-main .hover\:bg-teal-50:hover:not(.admin-light *) {
   background-color: rgb(216 184 120 / 0.09);
 }
-.admin-main :is(.ring-teal-600\/15, .ring-teal-600\/20) {
+.admin-main :is(.ring-teal-600\/15, .ring-teal-600\/20):not(.admin-light *) {
   --tw-ring-color: rgb(216 184 120 / 0.24);
 }
-.admin-main :is(.bg-teal-400, .bg-teal-500, .bg-teal-600) {
+.admin-main :is(.bg-teal-400, .bg-teal-500, .bg-teal-600):not(.admin-light *) {
   background-color: rgb(216 184 120 / 0.16);
 }
 
 /* Status tints stay whisper-quiet: translucent wash + light ink. */
-.admin-main :is(.bg-red-50, .bg-red-50\/40, .bg-rose-50, .bg-rose-50\/80, .bg-red-100) {
+.admin-main :is(.bg-red-50, .bg-red-50\/40, .bg-rose-50, .bg-rose-50\/80, .bg-red-100):not(.admin-light *) {
   background-color: rgb(244 63 94 / 0.1);
 }
-.admin-main .hover\:bg-red-100:hover {
+.admin-main .hover\:bg-red-100:hover:not(.admin-light *) {
   background-color: rgb(244 63 94 / 0.16);
 }
-.admin-main :is(.text-red-600, .text-red-700, .text-red-800, .text-rose-600, .text-rose-700) {
+.admin-main :is(.text-red-600, .text-red-700, .text-red-800, .text-rose-600, .text-rose-700):not(.admin-light *) {
   color: #fda4af;
 }
-.admin-main :is(.border-red-100, .border-red-200, .border-red-300, .border-rose-200\/80, .border-rose-500\/30) {
+.admin-main :is(.border-red-100, .border-red-200, .border-red-300, .border-rose-200\/80, .border-rose-500\/30):not(.admin-light *) {
   border-color: rgb(244 63 94 / 0.22);
 }
-.admin-main :is(.ring-rose-600\/15, .ring-rose-600\/20) {
+.admin-main :is(.ring-rose-600\/15, .ring-rose-600\/20):not(.admin-light *) {
   --tw-ring-color: rgb(244 63 94 / 0.24);
 }
-.admin-main .bg-rose-500\/10 {
+.admin-main .bg-rose-500\/10:not(.admin-light *) {
   background-color: rgb(244 63 94 / 0.12);
 }
-.admin-main .bg-rose-500,
-.admin-main .bg-red-500 {
+.admin-main .bg-rose-500:not(.admin-light *),
+.admin-main .bg-red-500:not(.admin-light *) {
   background-color: #e16a7b;
 }
 
-.admin-main :is(.bg-emerald-50, .bg-emerald-50\/80, .bg-emerald-100) {
+.admin-main :is(.bg-emerald-50, .bg-emerald-50\/80, .bg-emerald-100):not(.admin-light *) {
   background-color: rgb(74 222 128 / 0.1);
 }
-.admin-main :is(.text-emerald-700, .text-emerald-800, .text-emerald-950) {
+.admin-main :is(.text-emerald-700, .text-emerald-800, .text-emerald-950):not(.admin-light *) {
   color: #a7d8b4;
 }
-.admin-main :is(.border-emerald-200\/80, .border-emerald-300) {
+.admin-main :is(.border-emerald-200\/80, .border-emerald-300):not(.admin-light *) {
   border-color: rgb(74 222 128 / 0.22);
 }
-.admin-main .ring-emerald-600\/15 {
+.admin-main .ring-emerald-600\/15:not(.admin-light *) {
   --tw-ring-color: rgb(74 222 128 / 0.24);
 }
-.admin-main .bg-emerald-500 {
+.admin-main .bg-emerald-500:not(.admin-light *) {
   background-color: #6fbf8a;
 }
 
-.admin-main :is(.bg-amber-50, .bg-amber-50\/60, .bg-amber-50\/80) {
+.admin-main :is(.bg-amber-50, .bg-amber-50\/60, .bg-amber-50\/80):not(.admin-light *) {
   background-color: rgb(216 184 120 / 0.1);
 }
-.admin-main :is(.text-amber-600, .text-amber-700, .text-amber-800, .text-amber-900) {
+.admin-main :is(.text-amber-600, .text-amber-700, .text-amber-800, .text-amber-900):not(.admin-light *) {
   color: #e5c893;
 }
-.admin-main :is(.border-amber-200, .border-amber-300) {
+.admin-main :is(.border-amber-200, .border-amber-300):not(.admin-light *) {
   border-color: rgb(216 184 120 / 0.22);
 }
-.admin-main :is(.ring-amber-600\/10, .ring-amber-600\/15, .ring-amber-600\/20) {
+.admin-main :is(.ring-amber-600\/10, .ring-amber-600\/15, .ring-amber-600\/20):not(.admin-light *) {
   --tw-ring-color: rgb(216 184 120 / 0.24);
 }
-.admin-main .bg-amber-500 {
+.admin-main .bg-amber-500:not(.admin-light *) {
   background-color: var(--admin-gold);
 }
 
 /* Neutral tints for the remaining status families — one quiet ink, no rainbow. */
-.admin-main :is(.bg-violet-50, .bg-indigo-50, .bg-sky-50) {
+.admin-main :is(.bg-violet-50, .bg-indigo-50, .bg-sky-50):not(.admin-light *) {
   background-color: rgb(255 255 255 / 0.055);
 }
-.admin-main :is(.text-violet-700, .text-indigo-700, .text-sky-700) {
+.admin-main :is(.text-violet-700, .text-indigo-700, .text-sky-700):not(.admin-light *) {
   color: #cfc9be;
 }
-.admin-main :is(.ring-violet-600\/15, .ring-indigo-600\/15, .ring-sky-600\/15) {
+.admin-main :is(.ring-violet-600\/15, .ring-indigo-600\/15, .ring-sky-600\/15):not(.admin-light *) {
   --tw-ring-color: var(--admin-line-strong);
 }
 
-.admin-main :is(.bg-stone-950, .bg-black\/20) {
+.admin-main :is(.bg-stone-950, .bg-black\/20):not(.admin-light *) {
   background-color: rgb(0 0 0 / 0.35);
 }
 
 /* Hover ink: light pages darken text on hover; on dark it brightens instead, so it stays readable. */
-.admin-main :is(.hover\:text-stone-700, .hover\:text-stone-800, .hover\:text-stone-900, .hover\:text-stone-200):hover {
+.admin-main :is(.hover\:text-stone-700, .hover\:text-stone-800, .hover\:text-stone-900, .hover\:text-stone-200):hover:not(.admin-light *) {
   color: #ffffff;
 }
-.admin-main :is(.hover\:text-teal-900, .group:hover .group-hover\:text-teal-600, .hover\:text-teal-600):hover,
-.admin-main .group:hover .group-hover\:text-teal-600 {
+.admin-main :is(.hover\:text-teal-900, .group:hover .group-hover\:text-teal-600, .hover\:text-teal-600):hover:not(.admin-light *),
+.admin-main .group:hover .group-hover\:text-teal-600:not(.admin-light *) {
   color: var(--admin-gold-bright);
 }
-.admin-main .hover\:ring-stone-300:hover {
+.admin-main .hover\:ring-stone-300:hover:not(.admin-light *) {
   --tw-ring-color: var(--admin-line-strong);
 }
-.admin-main .hover\:border-stone-300:hover {
+.admin-main .hover\:border-stone-300:hover:not(.admin-light *) {
   border-color: var(--admin-line-strong);
 }
-.admin-main .hover\:bg-emerald-100:hover {
+.admin-main .hover\:bg-emerald-100:hover:not(.admin-light *) {
   background-color: rgb(74 222 128 / 0.16);
 }
-.admin-main :is(.from-stone-100, .via-white) {
+.admin-main :is(.from-stone-100, .via-white):not(.admin-light *) {
   --tw-gradient-from: rgb(255 255 255 / 0.06) var(--tw-gradient-from-position);
   --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position);
   --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
 }
-.admin-main .to-stone-200 {
+.admin-main .to-stone-200:not(.admin-light *) {
   --tw-gradient-to: rgb(255 255 255 / 0.1) var(--tw-gradient-to-position);
 }
-.admin-main .hover\:shadow-sm:hover {
+.admin-main .hover\:shadow-sm:hover:not(.admin-light *) {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
 
 /* Links that are underlined in body copy: keep them visibly links. */
-.admin-main :is(p, li, dd) a.underline {
+.admin-main :is(p, li, dd) a.underline:not(.admin-light *) {
   color: var(--admin-gold-bright);
   text-decoration-color: rgb(216 184 120 / 0.45);
 }
 
 /* Code and mono values. */
-.admin-main :is(code, .font-mono) {
+.admin-main :is(code, .font-mono):not(.admin-light *) {
   color: #e9e3d6;
 }
 
@@ -924,7 +924,7 @@
     animation: none;
   }
 
-  .admin-main :is(a, button):hover {
+  .admin-main :is(a, button):hover:not(.admin-light *) {
     transform: none !important;
   }
 }
@@ -982,4 +982,12 @@
 @keyframes admin-nav-progress {
   from { transform: scaleX(0.05); }
   to { transform: scaleX(0.9); }
+}
+
+/* A light island inside the dark admin (the inbox conversation): widget cards render exactly as
+   the customer saw them. The dark-theme rules above skip anything inside `.admin-light`. */
+.admin-main .admin-light {
+  background-color: #fafaf9;
+  color: #1c1917;
+  color-scheme: light;
 }

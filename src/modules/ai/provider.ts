@@ -20,8 +20,13 @@ export type UserContentPart =
   | { type: "document"; mime: "application/pdf"; data: string; name?: string };
 
 export type ProviderMessage =
-  /** `cache`: this block is the same on every turn, so providers that support prompt caching may cache up to it. */
-  | { role: "system"; content: string; cache?: boolean }
+  /**
+   * `cache`: this block is the same on every turn, so providers that support prompt caching may cache up to it.
+   * `inline`: per-turn context kept at its position in the conversation (just before the customer's latest
+   * message) for providers that take a single system message, so the long unchanging part before it
+   * (instructions, tools, history) can be served from the provider's prompt cache.
+   */
+  | { role: "system"; content: string; cache?: boolean; inline?: boolean }
   | { role: "user"; content: string | UserContentPart[] }
   | {
       role: "assistant";
@@ -178,13 +183,23 @@ function openAiHeaders(config: Pick<AiConfig, "apiKey">): Record<string, string>
   };
 }
 
+/** How per-turn context appears in the conversation for OpenAI-compatible APIs (see ProviderMessage `inline`). */
+export const SHOP_CONTEXT_LABEL = "[SHOP CONTEXT for this turn, from the shop system, not the customer]";
+
 function toOpenAiMessages(messages: ProviderMessage[]) {
-  // One system message: some OpenAI-compatible servers reject or ignore a second one.
+  // One system message: some OpenAI-compatible servers reject or ignore a second one. Per-turn context
+  // marked `inline` stays where it is, as a short note before the customer's latest message: the system
+  // message then never changes between turns, so instructions + tools + history form a long repeated
+  // prefix that the provider's prompt cache can serve (Gemini needs 4,096+ matching tokens).
   const system = messages
-    .filter((message): message is Extract<ProviderMessage, { role: "system" }> => message.role === "system")
+    .filter((message): message is Extract<ProviderMessage, { role: "system" }> => message.role === "system" && !message.inline)
     .map((message) => message.content)
     .join("\n\n");
-  const rest = messages.filter((message) => message.role !== "system");
+  const rest = messages
+    .filter((message) => message.role !== "system" || message.inline)
+    .map((message): ProviderMessage =>
+      message.role === "system" ? { role: "user", content: `${SHOP_CONTEXT_LABEL}\n${message.content}` } : message,
+    );
 
   // Strip fields that only the Anthropic adapter understands.
   const converted = rest.map((message) => {

@@ -12,3 +12,13 @@ describe("ending a voice call", () => {
     expect(realtimeTools().map((tool) => tool.name)).toContain("end_call");
   });
 });
+
+describe("voice tool set", () => {
+  it("leaves out the text-chat checkout tools on a call", () => {
+    const names = getLiveCallTools().map((tool) => tool.function.name);
+    expect(names).not.toContain("prepare_checkout");
+    expect(names).not.toContain("save_customer_details");
+    expect(names).toContain("propose_order");
+    expect(names).toContain("go_to_checkout");
+  });
+});

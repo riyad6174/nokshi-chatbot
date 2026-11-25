@@ -48,6 +48,15 @@ describe("taking the customer to a page", () => {
     expect(navigation(result.ui)?.url).toBe("/products/trail-backpack");
   });
 
+  it("finds 'number 2' in a list shown earlier in the same reply, before it's saved", async () => {
+    const session = await newSession();
+    const shownThisTurn = [{ type: "product_list", products: [fx.products.tote, fx.products.backpack], label: "Bags" }] as unknown as ChatPart[];
+    const page = await executeTool({ session, shownThisTurn }, "open_product_page", JSON.stringify({ position: 2 }));
+    expect(navigation(page.ui)?.url).toBe("/products/trail-backpack");
+    const added = await executeTool({ session, shownThisTurn }, "add_to_cart", JSON.stringify({ position: 1 }));
+    expect(added.ok, JSON.stringify(added.content)).toBe(true);
+  });
+
   it("understands a Bangla product name", async () => {
     const session = await newSession();
     const result = await executeTool({ session }, "open_product_page", JSON.stringify({ product: "ব্যাকপ্যাক" }));

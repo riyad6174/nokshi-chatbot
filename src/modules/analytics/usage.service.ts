@@ -21,6 +21,8 @@ export type RecordUsageInput = {
   sessionId?: string | null;
   turnLogId?: string | null;
   messageId?: string | null;
+  /** Live voice: the browser's id of the spoken reply (linked to its message once saved). */
+  replyKey?: string | null;
   channel: UsageChannel;
   source: UsageSource;
   mode: "live" | "demo";
@@ -74,6 +76,7 @@ export async function recordUsage(input: RecordUsageInput): Promise<AiUsageEvent
           sessionId,
           turnLogId,
           messageId,
+          ...(input.replyKey ? { replyKey: input.replyKey.slice(0, 100) } : {}),
           channel: input.channel,
           source: input.source,
           mode: input.mode,

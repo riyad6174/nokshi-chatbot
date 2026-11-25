@@ -63,6 +63,12 @@ export type AssistantHistoryMessage = { role: "user" | "assistant"; content: str
  */
 const MAX_TOOL_ITERATIONS = 2;
 
+/** Tools whose whole answer is opening a page: their reply is this fixed line, not another model round. */
+const PAGE_TOOLS: Record<string, { bn: string; en: string }> = {
+  open_product_page: { bn: "পেজটা খুলে দিলাম।", en: "Here's its page." },
+  go_to_checkout: { bn: "চেকআউট পেজটা খুলে দিলাম।", en: "I've opened the checkout for you." },
+};
+
 type PartBuilder = {
   text: () => string;
   currentText: () => string;
@@ -134,6 +140,9 @@ export async function* runLiveAssistant(input: {
   };
   const settings = input.session.store.settings;
   const salesConfig = resolveSalesConfig(settings);
+  const detectedLanguage = detectLang(latestUserText, input.session.locale.startsWith("bn") ? "bn" : "en");
+  /** The language this reply is in: the store's choice, or the customer's when it follows them. */
+  const replyLang: "bn" | "en" = salesConfig.language === "auto" ? detectedLanguage : salesConfig.language;
   const preModelStarted = Date.now();
   // Everything the prompt needs, loaded at once (each is a database round-trip). The visitor's
   // profile is read once and used for both the saved details and the sales context.
@@ -156,6 +165,7 @@ export async function* runLiveAssistant(input: {
     loadAttachments(),
   ]);
   toolContext.cartItemCount = input.cart.itemCount;
+  toolContext.shownThisTurn = [];
   toolContext.openOrder = Boolean(openOrder);
   const tools = getProviderTools(settings?.enabledFeatures, { cartItemCount: input.cart.itemCount, openOrder: Boolean(openOrder) });
   const savedDetails = savedDetailsFromProfile(profile);
@@ -177,7 +187,7 @@ export async function* runLiveAssistant(input: {
     salesTurn,
     conversationSummary: input.conversationSummary,
     askedName: historyAskedName(input.history),
-    replyLanguage: detectLang(latestUserText, input.session.locale.startsWith("bn") ? "bn" : "en"),
+    replyLanguage: detectedLanguage,
     session: input.session,
     cart: input.cart,
     configuredInstructions: settings?.systemInstructions,
@@ -185,10 +195,14 @@ export async function* runLiveAssistant(input: {
     channel: input.channel ?? "text",
   });
 
+  // The per-turn context goes right before the customer's latest message (not into the system
+  // message): what comes before it is the same on every turn and every round, so it's cacheable.
+  const history: ProviderMessage[] = input.history.map((message) => ({ role: message.role, content: message.content }));
+  const latestIsUser = history.at(-1)?.role === "user";
+  const turnContext: ProviderMessage = { role: "system", content: system.perTurn, inline: true };
   const messages: ProviderMessage[] = [
     { role: "system", content: system.stable, cache: true },
-    { role: "system", content: system.perTurn },
-    ...input.history.map((message) => ({ role: message.role, content: message.content })),
+    ...(latestIsUser ? [...history.slice(0, -1), turnContext, history.at(-1)!] : [...history, turnContext]),
   ];
   // The customer's files go with their latest message (only that one: earlier files stay as notes).
   const lastIndex = messages.length - 1;
@@ -294,6 +308,36 @@ export async function* runLiveAssistant(input: {
       break;
     }
 
+    // Only page openings, all done: the reply is a fixed line, so the follow-up model round (a whole
+    // prompt again) is skipped. The page is already opening on the customer's screen.
+    const pageOnly = toolCalls.length > 0 && toolCalls.every((call) => PAGE_TOOLS[call.function.name]);
+    if (pageOnly && !finalRound && !nudgedForText) {
+      messages.push({ role: "assistant", content: iterationText || null, tool_calls: toolCalls, raw });
+      const results = await Promise.all(toolCalls.map((call) => executeTool(toolContext, call.function.name, call.function.arguments)));
+      toolCalls.forEach((call, index) => {
+        const result = results[index]!;
+        toolLog.push({ name: call.function.name, ok: result.ok, code: result.ok ? "" : String((result.content as { error?: { code?: string } })?.error?.code ?? "error"), ms: 0 });
+      });
+      for (const result of results) for (const part of result.ui ?? []) {
+        toolContext.shownThisTurn?.push(part);
+        builder.addUi(part);
+        yield { type: "ui", part };
+      }
+      if (results.every((result) => result.ok) && !iterationText.trim() && builder.text().length === 0) {
+        const line = PAGE_TOOLS[toolCalls[0]!.function.name]![replyLang];
+        builder.appendText(line);
+        receivedAnyText = true;
+        yield { type: "delta", text: line };
+        break;
+      }
+      // A page couldn't open (or the model already said something): let the model handle it as usual.
+      results.forEach((result, index) => {
+        const serialized = JSON.stringify(compactToolContent(result.content));
+        messages.push({ role: "tool", tool_call_id: toolCalls[index]!.id, name: toolCalls[index]!.function.name, isError: !result.ok, content: serialized.slice(0, 12_000) });
+      });
+      continue;
+    }
+
     if (toolCalls.length === 0) {
       // The model ended without saying anything (some models do after a tool result). Before counting
       // the turn as a miss (fallback text; two misses hand the chat to a person), ask once for the
@@ -359,6 +403,7 @@ export async function* runLiveAssistant(input: {
       });
 
       for (const part of result.ui ?? []) {
+        toolContext.shownThisTurn?.push(part);
         builder.addUi(part);
         yield { type: "ui", part };
       }

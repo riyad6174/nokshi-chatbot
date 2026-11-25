@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { readWidgetSessionId } from "@/lib/auth/widget";
 import { jsonError, jsonOk, readJson, validationError } from "@/lib/http";
+import { prisma } from "@/lib/db/prisma";
 import { rateLimit } from "@/lib/rate-limit";
 import { recordTranscriptionUsage, recordUsage } from "@/modules/analytics/usage.service";
 import { getSessionContext } from "@/modules/conversations/session.service";
@@ -21,6 +22,8 @@ const bodySchema = z.object({
    * "gemini": one Gemini Live `usageMetadata` report (responseId = a per-call counter).
    */
   kind: z.enum(["response", "transcription", "gemini"]).default("response"),
+  /** The browser's id of the spoken reply this response belongs to (links it to the saved message). */
+  replyKey: z.string().trim().min(1).max(100).optional(),
 });
 
 /**
@@ -58,6 +61,7 @@ export async function POST(request: NextRequest) {
     if (!usage) return jsonOk({ recorded: false });
     const event = await recordUsage({
       eventKey: `gemini-live:${context.storeId}:${parsed.data.responseId}`,
+      replyKey: parsed.data.replyKey,
       storeId: context.storeId,
       conversationId: context.conversationId,
       sessionId: context.sessionId,
@@ -70,6 +74,7 @@ export async function POST(request: NextRequest) {
       usage,
       rawUsage: parsed.data.usage,
     });
+    await linkToSavedReply(context.conversationId, parsed.data.replyKey, event?.id);
     return jsonOk({ recorded: event !== null });
   }
 
@@ -78,6 +83,7 @@ export async function POST(request: NextRequest) {
 
   const event = await recordUsage({
     eventKey: `realtime:${context.storeId}:${parsed.data.responseId}`,
+    replyKey: parsed.data.replyKey,
     storeId: context.storeId,
     conversationId: context.conversationId,
     sessionId: context.sessionId,
@@ -91,5 +97,13 @@ export async function POST(request: NextRequest) {
     rawUsage: parsed.data.usage,
   });
 
+  await linkToSavedReply(context.conversationId, parsed.data.replyKey, event?.id);
   return jsonOk({ recorded: event !== null });
+}
+
+/** The reply may already be saved (its transcript arrived first): tie this usage row to it now. */
+async function linkToSavedReply(conversationId: string, replyKey: string | undefined, eventId: string | undefined) {
+  if (!replyKey || !eventId) return;
+  const message = await prisma.message.findFirst({ where: { conversationId, replyKey }, select: { id: true } });
+  if (message) await prisma.aiUsageEvent.update({ where: { id: eventId }, data: { messageId: message.id } }).catch(() => undefined);
 }

@@ -109,6 +109,8 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
    * empty transcript; removed from the call if the reply made no tool call (see onServerEvent).
    */
   const replyRef = useRef<{ id: string; text: string; interrupted: boolean; discard?: boolean; noiseItemId?: string } | null>(null);
+  /** The latest reply's id, kept after it ends: its usage report can arrive just after. */
+  const lastReplyIdRef = useRef<string | null>(null);
   /** What the assistant last said, to recognise its own voice coming back through the mic. */
   const lastSaidRef = useRef("");
   /** The customer's newest input item, the one a new reply answers. */
@@ -172,6 +174,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
         role: "assistant",
         text: reply.text.trim(),
         interrupted: reply.interrupted,
+        replyKey: reply.id,
       });
       callbacksRef.current.onReplyDone(reply.id, saved.message);
     } catch {
@@ -275,6 +278,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
           if (!replyRef.current) {
             const id = `voice-${Date.now()}`;
             replyRef.current = { id, text: "", interrupted: false };
+            lastReplyIdRef.current = id;
             callbacksRef.current.onReplyStart(id);
           }
           if (phaseRef.current !== "paused" && !speakingRef.current) setPhase("thinking");
@@ -311,6 +315,7 @@ export function useRealtimeVoice(callbacks: RealtimeCallbacks) {
               responseId,
               model: response.model,
               usage: response.usage,
+              replyKey: replyRef.current?.id ?? lastReplyIdRef.current ?? undefined,
             }).catch(() => undefined);
           }
           const current = replyRef.current;

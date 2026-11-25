@@ -50,7 +50,7 @@ type MessageListProps = {
   workingLabel?: string | null;
 };
 
-type ActionKind = "products" | "cart" | "checkout" | "delivery" | "order" | "tracking";
+export type ActionKind = "products" | "cart" | "checkout" | "delivery" | "order" | "tracking";
 
 const ICONS: Record<ActionKind, ReactNode> = {
   products: <path d="M12 2l2.2 5.8L20 10l-5.8 2.2L12 18l-2.2-5.8L4 10l5.8-2.2z" fill="currentColor" stroke="none" />,
@@ -73,7 +73,7 @@ const ICONS: Record<ActionKind, ReactNode> = {
   tracking: <path d="M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8" />,
 };
 
-function actionMeta(part: ChatPart): { kind: ActionKind; label: string; detail?: string } | null {
+export function actionMeta(part: ChatPart): { kind: ActionKind; label: string; detail?: string } | null {
   switch (part.type) {
     case "product_list":
       return {
@@ -105,7 +105,7 @@ function actionMeta(part: ChatPart): { kind: ActionKind; label: string; detail?:
 }
 
 /** Side-by-side catalog facts. Scrolls horizontally on narrow screens. */
-function ComparisonTable({ part }: { part: Extract<ChatPart, { type: "comparison" }> }) {
+export function ComparisonTable({ part }: { part: Extract<ChatPart, { type: "comparison" }> }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[260px] border-collapse text-left text-[11.5px]">
@@ -140,7 +140,7 @@ function ComparisonTable({ part }: { part: Extract<ChatPart, { type: "comparison
   );
 }
 
-function ActionCard({
+export function ActionCard({
   kind,
   label,
   detail,

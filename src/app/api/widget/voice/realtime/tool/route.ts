@@ -14,6 +14,7 @@ import {
   changesOrderState,
   pickWaitFiller,
   realtimeStateNote,
+  peekShownParts,
   rememberShownParts,
   storeLanguage,
   toolOutputForModel,
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
   const turnStartedAt = new Date(Date.now() - (parsed.data.speechAgoMs ?? 0));
 
   const result = await executeTool(
-    { session: context, turnStartedAt, channel: "voice", latestUserText: recentUserTexts[0] ?? "", recentUserTexts, acceptedPersonOffer },
+    { session: context, turnStartedAt, channel: "voice", latestUserText: recentUserTexts[0] ?? "", recentUserTexts, acceptedPersonOffer, shownThisTurn: peekShownParts(context.conversationId) },
     parsed.data.name,
     parsed.data.arguments,
   );

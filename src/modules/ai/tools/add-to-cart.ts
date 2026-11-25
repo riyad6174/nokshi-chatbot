@@ -61,7 +61,7 @@ export const addToCartTool: ToolDefinition = {
     let productId = input.productId ?? "";
     // Picked by number: the list on screen decides, not an id the model may have mixed up.
     if (input.position) {
-      const atPosition = await productIdAtPosition(ctx.session.conversationId, input.position);
+      const atPosition = await productIdAtPosition(ctx.session.conversationId, input.position, ctx.shownThisTurn);
       if (!atPosition) return failure("position_not_found", `There is no product number ${input.position} on screen. Ask which product they mean.`);
       productId = atPosition;
     }

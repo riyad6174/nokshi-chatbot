@@ -116,10 +116,16 @@ export function getProviderTools(enabledFeatures?: string | string[] | null, sta
   }));
 }
 
-/** The tools of a live voice call: the chat tools plus call controls (end_call). */
+/**
+ * Text-chat checkout flow (a details form in the chat, then the checkout page): a call orders with
+ * propose_order / confirm_order and opens checkout with go_to_checkout, so these are left out there.
+ */
+const TEXT_ONLY_TOOLS = new Set(["prepare_checkout", "save_customer_details"]);
+
+/** The tools of a live voice call: the chat tools without the text-only ones, plus call controls (end_call). */
 export function getLiveCallTools(enabledFeatures?: string | string[] | null): ProviderTool[] {
   return [
-    ...getProviderTools(enabledFeatures),
+    ...getProviderTools(enabledFeatures).filter((tool) => !TEXT_ONLY_TOOLS.has(tool.function.name)),
     ...liveCallOnlyTools.map((tool) => ({
       type: "function" as const,
       function: { name: tool.name, description: shortenDescription(tool.description), parameters: tool.parameters },
